@@ -1,0 +1,4 @@
+name = "StageInfo"
+
+[StarMap]
+EntryAssembly = "StageInfo"
