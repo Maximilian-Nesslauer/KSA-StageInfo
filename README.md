@@ -12,7 +12,7 @@ a totals footer and a multi-stage-aware burn duration for auto-burns.
     <th align="center">Stock</th>
     <th align="center">With StageInfo</th>
   </tr>
-  <tr>
+  <tr valign="top">
     <td><img src="images/stock.png" alt="Stock staging window" width="420" /></td>
     <td><img src="images/stageinfo.png" alt="Staging window with StageInfo" width="420" /></td>
   </tr>
