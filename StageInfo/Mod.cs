@@ -14,7 +14,7 @@ public class Mod
 {
     private static Harmony? _harmony;
 
-    private const string TestedGameVersion = "v2026.4.15.4141";
+    private const string TestedGameVersion = "v2026.4.16.4170";
 
     public static bool DebugMode => DebugConfig.Any;
 
