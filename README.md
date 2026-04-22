@@ -55,17 +55,33 @@ enabled = true
 
 ## Dependencies
 
-- [StarMap](https://github.com/StarMapLoader/StarMap) - mod loader, required at runtime (see [Installation](#installation)).
+| Package | Purpose | Tested version |
+| --- | --- | --- |
+| [StarMap](https://github.com/StarMapLoader/StarMap) | Mod loader, required at runtime (see [Installation](#installation)) | 0.4.5 |
 
 ## Build dependencies
 
-Only needed to build the mod from source.
+Required only to build the mod from source. Targets **.NET 10**.
 
-- [StarMap.API](https://github.com/StarMapLoader/StarMap) (NuGet)
-- [Lib.Harmony](https://www.nuget.org/packages/Lib.Harmony) (NuGet)
+| Package | Source | Tested Version |
+| --- | --- | --- |
+| [StarMap.API](https://github.com/StarMapLoader/StarMap) | NuGet | 0.3.6 |
+| [Lib.Harmony](https://www.nuget.org/packages/Lib.Harmony) | NuGet | 2.4.2 |
+
+## Mod compatibility
+
+- Known conflicts: none
 
 ## Notes
 
 - Sequences are ignition groups (what activates when you press the stage
   key). Stages are jettison groups / fuel pools. The stock window
-  already shows both
+  already shows both.
+
+## Community
+
+Thread on the KSA forums: https://forums.ahwoo.com/threads/stageinfo.905/
+
+## Check out my other mods
+
+- [AutoStage](https://github.com/Maximilian-Nesslauer/KSA-AutoStage) - automatic staging during auto-burns and manual flight, with configurable ignition delays ([forum thread](https://forums.ahwoo.com/threads/autostage.891/))
