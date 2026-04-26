@@ -24,4 +24,15 @@ internal static class MassHelpers
             mass += SumInertMass(subs[i].Modules);
         return mass;
     }
+
+    /// <summary>Tank capacity in kg, derived from the per-mole liquid density
+    /// and container volume. Stable for nearly-empty tanks where dividing the
+    /// current mass by the filled fraction would underestimate.</summary>
+    public static float ComputeTankMaxMass(Tank tank)
+    {
+        float maxMass = 0f;
+        foreach (Mole mole in tank.Moles)
+            maxMass += mole.GetLiquidMass(mole.ContainerVolume);
+        return maxMass;
+    }
 }

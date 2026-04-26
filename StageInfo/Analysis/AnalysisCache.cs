@@ -11,7 +11,7 @@ namespace StageInfo.Analysis;
 /// and their dictionary lookups. All mutation goes through the methods so
 /// the cache-owned lists aren't aliased with the analyzer's pooled lists.
 /// </summary>
-sealed class AnalysisSlot
+internal sealed class AnalysisSlot
 {
     public VehicleBurnAnalysis? Sequences;
     public readonly List<SequenceBurnInfo> SequenceList = new();
@@ -86,7 +86,7 @@ sealed class AnalysisSlot
 /// Vehicle.UpdateFromTaskResults. Skips analysis when neither a burn is
 /// planned nor the panel is visible.
 /// </summary>
-static class AnalysisCache
+internal static class AnalysisCache
 {
     private static readonly AnalysisSlot _primary = new();
     private static readonly AnalysisSlot _secondary = new();

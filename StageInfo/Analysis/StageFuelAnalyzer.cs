@@ -6,7 +6,7 @@ using StageInfo.Core;
 
 namespace StageInfo.Analysis;
 
-public record struct StageFuelInfo
+internal record struct StageFuelInfo
 {
     public int StageNumber;
     public float CurrentFuelMass;
@@ -17,7 +17,7 @@ public record struct StageFuelInfo
     public int DecouplerCount;
 }
 
-public record struct VehicleFuelAnalysis
+internal record struct VehicleFuelAnalysis
 {
     public List<StageFuelInfo> Stages;
 }
@@ -26,7 +26,7 @@ public record struct VehicleFuelAnalysis
 /// Per-stage fuel pool + mass snapshot. Stages are jettison / fuel-pool
 /// groups; dV is a sequence-level concept and lives in SequenceAnalyzer.
 /// </summary>
-public static class StageFuelAnalyzer
+internal static class StageFuelAnalyzer
 {
     private static readonly List<StageFuelInfo> _pooledStages = new();
     private static readonly Dictionary<int, int> _stageIndex = new();
@@ -75,11 +75,8 @@ public static class StageFuelAnalyzer
             for (int t = 0; t < tanks.Length; t++)
             {
                 Tank tank = tanks[t];
-                float cur = tank.ComputeSubstanceMass(moleStates);
-                float frac = tank.FilledFraction(moleStates);
-                float max = frac > 0.001f ? cur / frac : 0f;
-                info.CurrentFuelMass += cur;
-                info.MaxFuelMass += max;
+                info.CurrentFuelMass += tank.ComputeSubstanceMass(moleStates);
+                info.MaxFuelMass += MassHelpers.ComputeTankMaxMass(tank);
             }
 
             if (part.Modules.HasAny<EngineController>()) info.EngineCount++;

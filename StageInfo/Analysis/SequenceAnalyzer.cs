@@ -9,7 +9,7 @@ using StageInfo.Core;
 
 namespace StageInfo.Analysis;
 
-public record struct SequenceBurnInfo
+internal record struct SequenceBurnInfo
 {
     public int SequenceNumber;
     public bool IsActivated;
@@ -29,21 +29,22 @@ public record struct SequenceBurnInfo
     public int EngineCount;
 }
 
-public record struct VehicleBurnAnalysis
+internal record struct VehicleBurnAnalysis
 {
     public List<SequenceBurnInfo> Sequences;
     public float TotalDeltaV;
     public float TotalBurnTime;
 }
 
-public record struct BurnSequenceAllocation
+internal record struct BurnSequenceAllocation
 {
     public int SequenceNumber;
     public float AllocatedDv;
     public float SequenceTotalDv;
+    public float AllocatedBurnTime;
 }
 
-public record struct BurnAnalysis
+internal record struct BurnAnalysis
 {
     public float RequiredDv;
     public float AvailableDv;
@@ -56,8 +57,11 @@ public record struct BurnAnalysis
 /// Per-sequence Delta V analyzer. Walks sequences in activation order; for each,
 /// decouplers jettison subtrees, then engines burn their SameStage fuel pool.
 /// Main-thread only (shared pools).
+///
+/// Verbose <paramref name="log"/> output is opt-in; the parameter threads
+/// through the helpers so each level can emit its own detail.
 /// </summary>
-public static class SequenceAnalyzer
+internal static class SequenceAnalyzer
 {
     private const float MinMassFlowRate = 1e-6f;
     private const float MinDryMass = 1f;
@@ -65,7 +69,7 @@ public static class SequenceAnalyzer
     #region Pooled Collections
 
     private static readonly List<SequenceBurnInfo> _pooledSequences = new();
-    private static readonly HashSet<ulong> _pooledJettisonedPartIds = new();
+    private static readonly HashSet<uint> _pooledJettisonedPartIds = new();
     private static readonly HashSet<ulong> _pooledFuelClaimedTankIds = new();
     private static readonly List<Sequence> _pooledSortedSequences = new();
     private static readonly List<EngineController> _pooledEngines = new();
@@ -128,6 +132,8 @@ public static class SequenceAnalyzer
                 $"ambientPressure={ambientPressure:F0} Pa");
         }
 
+        // SequenceList.ResetCaches already sorts by Number, but we sort our own
+        // copy defensively so a future game change can't shuffle our walk order.
         SortSequencesAscending(sequences);
 
         for (int si = 0; si < _pooledSortedSequences.Count; si++)
@@ -199,28 +205,31 @@ public static class SequenceAnalyzer
             var (fuelMass, maxFuelMass) = ComputeSequenceFuel(
                 _pooledEngines, _pooledFuelClaimedTankIds, moleStates, log);
 
-            float maxFuel = currentMass - MinDryMass;
-            if (fuelMass > maxFuel)
+            // FuelFraction reflects tank fill state, not the burnable amount,
+            // so it's computed before any clamp.
+            float fuelFraction = maxFuelMass > 0f ? fuelMass / maxFuelMass : 0f;
+
+            float burnableFuel = fuelMass;
+            float maxBurnable = currentMass - MinDryMass;
+            if (burnableFuel > maxBurnable)
             {
                 if (log)
                     DefaultCategory.Log.Warning(
-                        $"[StageInfo]   Sequence {sequence.Number}: fuel ({fuelMass:F1} kg) clamped " +
-                        $"to max burnable mass ({maxFuel:F1} kg)");
-                fuelMass = Math.Max(0f, maxFuel);
+                        $"[StageInfo]   Sequence {sequence.Number}: fuel ({burnableFuel:F1} kg) clamped " +
+                        $"to max burnable mass ({maxBurnable:F1} kg)");
+                burnableFuel = Math.Max(0f, maxBurnable);
             }
 
-            // Tsiolkovsky.
+            // Tsiolkovsky. After the clamp, endMass >= MinDryMass > 0.
             float startMass = currentMass;
-            float endMass = currentMass - fuelMass;
-            float dv = (endMass > 0f && fuelMass > 0f)
+            float endMass = currentMass - burnableFuel;
+            float dv = burnableFuel > 0f
                 ? ve * MathF.Log(startMass / endMass)
                 : 0f;
-            float burnTime = fuelMass / totalFlowRate;
+            float burnTime = burnableFuel / totalFlowRate;
             float twr = (surfaceGravity > 0f)
                 ? totalThrust / (startMass * surfaceGravity)
                 : 0f;
-
-            float fuelFraction = maxFuelMass > 0f ? fuelMass / maxFuelMass : 0f;
 
             var info = new SequenceBurnInfo
             {
@@ -253,7 +262,8 @@ public static class SequenceAnalyzer
                     $"[StageInfo]   Sequence {sequence.Number}{activatedTag}: " +
                     $"dV={dv:F1} m/s, burn={burnTime:F1} s, TWR={twr:F2}, " +
                     $"thrust={totalThrust:F0} N, Ve={ve:F1} m/s, Isp={isp:F1} s, " +
-                    $"fuel={fuelMass:F1} kg, mass={startMass:F1}->{endMass:F1} kg, " +
+                    $"fuel={burnableFuel:F1}/{fuelMass:F1} kg burnable/in-tanks, " +
+                    $"mass={startMass:F1}->{endMass:F1} kg, " +
                     $"engines={_pooledEngines.Count}");
             }
 
@@ -283,7 +293,7 @@ public static class SequenceAnalyzer
     }
 
     private static void CollectEngines(Sequence sequence,
-        HashSet<ulong> jettisonedPartIds, bool sequenceActivated, bool log)
+        HashSet<uint> jettisonedPartIds, bool sequenceActivated, bool log)
     {
         _pooledEngines.Clear();
         ReadOnlySpan<Part> parts = sequence.Parts;
@@ -366,7 +376,8 @@ public static class SequenceAnalyzer
             {
                 SequenceNumber = seq.SequenceNumber,
                 AllocatedDv = allocatedDv,
-                SequenceTotalDv = seq.DeltaV
+                SequenceTotalDv = seq.DeltaV,
+                AllocatedBurnTime = burnTime
             });
 
             result.TotalBurnTime += burnTime;
@@ -444,14 +455,14 @@ public static class SequenceAnalyzer
                     continue;
 
                 float mass = tank.ComputeSubstanceMass(moleStates);
-                float filledFraction = tank.FilledFraction(moleStates);
-                float maxMass = filledFraction > 0.001f ? mass / filledFraction : 0f;
+                float maxMass = MassHelpers.ComputeTankMaxMass(tank);
 
                 current += mass;
                 max += maxMass;
 
                 if (log && mass > 0.01f)
                 {
+                    float filledFraction = maxMass > 0f ? mass / maxMass : 0f;
                     DefaultCategory.Log.Debug(
                         $"[StageInfo]       Tank '{tank.InstanceId}' on " +
                         $"'{tank.Parent.FullPart.DisplayName}' " +
@@ -475,7 +486,7 @@ public static class SequenceAnalyzer
     private static float ComputeJettisonedMass(
         Sequence sequence,
         ReadOnlySpan<MoleState> moleStates,
-        HashSet<ulong> jettisonedPartIds,
+        HashSet<uint> jettisonedPartIds,
         HashSet<ulong> fuelClaimedTankIds,
         bool log)
     {
@@ -506,7 +517,7 @@ public static class SequenceAnalyzer
     private static float CollectSubtreeMass(
         Part part,
         ReadOnlySpan<MoleState> moleStates,
-        HashSet<ulong> jettisonedPartIds,
+        HashSet<uint> jettisonedPartIds,
         HashSet<ulong> fuelClaimedTankIds)
     {
         if (!jettisonedPartIds.Add(part.InstanceId))

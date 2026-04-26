@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using MethodInvoker = System.Reflection.MethodInvoker;
 using Brutal.ImGuiApi;
 using Brutal.Logging;
 using Brutal.Numerics;
@@ -17,48 +18,44 @@ namespace StageInfo.UI;
 /// Replaces StagingWindow.DrawContent. Sequences first (with dV/TWR/burn/Isp),
 /// separator, then Stages (fuel pool + mass + counts). Data from AnalysisCache.
 /// </summary>
-static class StageInfoPanel
+internal static class StageInfoPanel
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     private static readonly ImColor8 ColorInsufficient = new ImColor8(255, 60, 60, 255);
 
-    private static MethodInfo? _drawThruster;
-    private static MethodInfo? _drawEngine;
-    private static MethodInfo? _drawDecoupler;
+    private static MethodInvoker? _drawThruster;
+    private static MethodInvoker? _drawEngine;
+    private static MethodInvoker? _drawDecoupler;
 
     private static readonly string[] ModeLabels = { "Auto", "VAC", "ASL", "VAC + ASL", "Planning" };
-    private static bool _initialSizeApplied;
 
-    // Reused across InvokeDrawComponent calls. Safe because all ImGui
-    // rendering runs on the main thread.
-    private static readonly object[] _invokeArgs = new object[1];
-
-    public static bool ApplyPatches(Harmony harmony)
+    /// <summary>
+    /// Applies the StagingWindow.DrawContent prefix and prepares the
+    /// reflection invokers. Caller should have already passed
+    /// GameReflection.ValidatePanelTargets().
+    /// </summary>
+    public static void ApplyPatches(Harmony harmony)
     {
-        // Guard in case someone forgets ValidateAll before calling this.
-        Debug.Assert(GameReflection.StagingWindow_DrawContent != null);
-        Debug.Assert(GameReflection.StagingWindow_DrawComponentOpen != null);
-
-        _drawThruster = GameReflection.StagingWindow_DrawComponentOpen!
-            .MakeGenericMethod(typeof(ThrusterController));
-        _drawEngine = GameReflection.StagingWindow_DrawComponentOpen!
-            .MakeGenericMethod(typeof(EngineController));
-        _drawDecoupler = GameReflection.StagingWindow_DrawComponentOpen!
-            .MakeGenericMethod(typeof(Decoupler));
+        MethodInfo openComponent = GameReflection.StagingWindow_DrawComponentOpen!;
+        _drawThruster = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(ThrusterController)));
+        _drawEngine   = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(EngineController)));
+        _drawDecoupler = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(Decoupler)));
 
         harmony.Patch(GameReflection.StagingWindow_DrawContent!,
             prefix: new HarmonyMethod(typeof(StageInfoPanel), nameof(DrawContentPrefix)));
 
         if (DebugConfig.StageInfo)
             DefaultCategory.Log.Debug("[StageInfo] Panel patch applied.");
-        return true;
     }
 
     public static void Reset()
     {
-        // Re-suggest the panel size on next open; Harmony unpatch handles the MethodInfo fields.
-        _initialSizeApplied = false;
+        // MethodInvokers are reassigned on next ApplyPatches; null them so a
+        // partial reload can't reuse a stale binding.
+        _drawThruster = null;
+        _drawEngine = null;
+        _drawDecoupler = null;
     }
 
     #region DrawContent
@@ -73,12 +70,6 @@ static class StageInfoPanel
         if (vehicle == null)
             return false;
 
-        if (!_initialSizeApplied)
-        {
-            _initialSizeApplied = true;
-            float2 screen = ImGui.GetMainViewport().Size;
-            ImGui.SetWindowSize(new float2(screen.X * 0.13f, screen.Y * 0.32f));
-        }
 
         AnalysisCache.MarkPanelActive();
 
@@ -136,11 +127,9 @@ static class StageInfoPanel
         }
     }
 
-    private static void InvokeDrawComponent(MethodInfo? method, object instance, Part part)
+    private static void InvokeDrawComponent(MethodInvoker? invoker, object instance, Part part)
     {
-        if (method == null) return;
-        _invokeArgs[0] = part;
-        method.Invoke(instance, _invokeArgs);
+        invoker?.Invoke(instance, part);
     }
 
     #endregion
@@ -384,8 +373,11 @@ static class StageInfoPanel
 
         DrawInfoSegment(string.Format(Inv, "TWR: {0:F2}", info.Twr),
             ref lineX, availWidth, spacing, isFirst: false);
-        DrawInfoSegment(string.Format(Inv, "Burn: {0}", FormatBurnTime(info.BurnTime)),
+
+        float displayBurnTime = alloc?.AllocatedBurnTime ?? info.BurnTime;
+        DrawInfoSegment(string.Format(Inv, "Burn: {0}", FormatBurnTime(displayBurnTime)),
             ref lineX, availWidth, spacing, isFirst: false);
+
         DrawInfoSegment(string.Format(Inv, "ISP: {0:F0}s", info.Isp),
             ref lineX, availWidth, spacing, isFirst: false);
 

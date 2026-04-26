@@ -10,13 +10,11 @@ using StarMap.API;
 namespace StageInfo;
 
 [StarMapMod]
-public class Mod
+public sealed class Mod
 {
     private static Harmony? _harmony;
 
     private const string TestedGameVersion = "v2026.4.17.4184";
-
-    public static bool DebugMode => DebugConfig.Any;
 
     [StarMapAllModsLoaded]
     public void OnFullyLoaded()
@@ -30,21 +28,26 @@ public class Mod
 
         _harmony = new Harmony("com.maxi.stageinfo");
 
-        if (!GameReflection.ValidateAll())
-        {
-            DefaultCategory.Log.Warning("[StageInfo] Disabled - reflection targets not found.");
-            return;
-        }
+        bool panelOk = GameReflection.ValidatePanelTargets();
+        bool burnOk = GameReflection.ValidateBurnTarget();
 
-        StageInfoPanel.ApplyPatches(_harmony);
+        if (panelOk)
+        {
+            StageInfoPanel.ApplyPatches(_harmony);
+        }
+        else
+        {
+            DefaultCategory.Log.Warning(
+                "[StageInfo] Panel disabled - StagingWindow targets not found.");
+        }
 
         // Drives the cache for the controlled vehicle; writes corrected BurnDuration
         // only if the worker patch below is active (else it would flicker).
         _harmony.CreateClassProcessor(typeof(Patch_CorrectedBurnDuration)).Patch();
 
-        if (GameReflection.FlightComputer_UpdateBurnTarget != null)
+        if (burnOk)
         {
-            _harmony.Patch(GameReflection.FlightComputer_UpdateBurnTarget,
+            _harmony.Patch(GameReflection.FlightComputer_UpdateBurnTarget!,
                 postfix: new HarmonyMethod(typeof(Patch_WorkerIgnitionTiming),
                     nameof(Patch_WorkerIgnitionTiming.Postfix)));
             CorrectedBurnState.WorkerFixEnabled = true;
@@ -57,8 +60,12 @@ public class Mod
                 "(cache still drives the panel, but fc.Burn is not modified).");
         }
 
+#if DEBUG
+        // Verbose analyzer logging duplicates AnalysisCache work for the same
+        // tick; gated behind DEBUG so Release never pays for the redundancy.
         _harmony.CreateClassProcessor(typeof(DebugLoggingPatches.Patch_AnalyzeAfterStaging)).Patch();
         _harmony.CreateClassProcessor(typeof(DebugLoggingPatches.Patch_InitialAnalysis)).Patch();
+#endif
 
         DefaultCategory.Log.Info("[StageInfo] Loaded and patched.");
     }

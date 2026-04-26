@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
 using KSA;
 using StageInfo.Analysis;
 
 namespace StageInfo.UI;
 
-public enum StageDisplayMode
+internal enum StageDisplayMode
 {
     Auto,
     Vac,
@@ -18,7 +19,7 @@ public enum StageDisplayMode
 /// <see cref="AnalysisEnvironment"/> resolver.
 /// Label style: parens for single mode ((VAC)), brackets for dual ([VAC][ASL]).
 /// </summary>
-public static class StageInfoSettings
+internal static class StageInfoSettings
 {
     public static StageDisplayMode Mode = StageDisplayMode.Auto;
     public static string? SelectedBodyId;
@@ -71,7 +72,8 @@ public static class StageInfoSettings
 
             StageDisplayMode.Planning => ResolvePlanningEnvironment(vehicle),
 
-            _ => new AnalysisEnvironment(0f, null, null, null, "(VAC)", null, true)
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(Mode), Mode, "Unhandled StageDisplayMode")
         };
     }
 

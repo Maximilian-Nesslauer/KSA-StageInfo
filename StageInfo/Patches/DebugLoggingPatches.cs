@@ -8,9 +8,11 @@ namespace StageInfo.Patches;
 
 /// <summary>
 /// Logged analyzer passes on interesting events: after each staging, and
-/// once per newly-controlled vehicle.
+/// once per newly-controlled vehicle. The analyzer call duplicates the
+/// AnalysisCache pass on the same tick. acceptable because both sites are
+/// guarded by DebugConfig.StageInfo and only run in DEBUG builds.
 /// </summary>
-static class DebugLoggingPatches
+internal static class DebugLoggingPatches
 {
     private static string? _lastVehicleId;
 

@@ -6,7 +6,7 @@ namespace StageInfo.Analysis;
 /// dV-analysis inputs: ambient pressure and gravity, plus display labels.
 /// Secondary is set only in VAC+ASL mode.
 /// </summary>
-public readonly record struct AnalysisEnvironment(
+internal readonly record struct AnalysisEnvironment(
     float PrimaryPressure,
     float? PrimarySurfaceGravity,
     float? SecondaryPressure,
@@ -16,7 +16,7 @@ public readonly record struct AnalysisEnvironment(
     bool IsPrimaryCurrentCondition
 );
 
-public static class EnvironmentHelpers
+internal static class EnvironmentHelpers
 {
     public static float ComputeSurfaceGravity(IParentBody body)
     {

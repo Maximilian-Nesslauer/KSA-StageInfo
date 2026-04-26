@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading;
 using HarmonyLib;
 using KSA;
 using StageInfo.Analysis;
@@ -7,27 +8,36 @@ using StageInfo.Core;
 namespace StageInfo.Patches;
 
 /// <summary>
-/// Main-thread writer <-> worker-thread reader handoff for the corrected
-/// burn duration. Volatile fields pin the visibility barrier; one-frame
-/// staleness is fine because dV consumed per frame is tiny.
+/// Handoff from the main-thread writer to the worker-thread reader for the
+/// corrected burn duration and ignition time.
+///
+/// One-frame staleness is fine because dV consumed per frame is tiny.
 /// </summary>
-static class CorrectedBurnState
+internal static class CorrectedBurnState
 {
     // FC's copy ctor shares the Burn reference, so ReferenceEquals on BurnTarget
     // uniquely identifies the controlled vehicle's FC on the worker thread.
-    public static volatile BurnTarget? TrackedBurn;
+    internal static volatile BurnTarget? TrackedBurn;
 
-    // Aligned float reads/writes are atomic on x64; volatile pins visibility.
-    public static volatile float CorrectedDuration;
+    internal static volatile float CorrectedDuration;
+
+    private static double _correctedIgnitionTimeSeconds;
+
+    internal static SimTime CorrectedIgnitionTime
+    {
+        get => new SimTime(Volatile.Read(ref _correctedIgnitionTimeSeconds));
+        set => Volatile.Write(ref _correctedIgnitionTimeSeconds, value.Seconds());
+    }
 
     // False when the worker patch didn't apply; we then suppress main-thread
     // writes to fc.Burn to avoid single-frame flicker from the stock recompute.
-    public static bool WorkerFixEnabled;
+    internal static bool WorkerFixEnabled;
 
-    public static void Clear()
+    internal static void Clear()
     {
         TrackedBurn = null;
         CorrectedDuration = 0f;
+        Volatile.Write(ref _correctedIgnitionTimeSeconds, 0.0);
     }
 }
 
@@ -36,7 +46,7 @@ static class CorrectedBurnState
 /// IgnitionTime for the controlled vehicle.
 /// </summary>
 [HarmonyPatch(typeof(Vehicle), "UpdateFromTaskResults")]
-static class Patch_CorrectedBurnDuration
+internal static class Patch_CorrectedBurnDuration
 {
     static void Postfix(Vehicle __instance)
     {
@@ -65,10 +75,13 @@ static class Patch_CorrectedBurnDuration
         // recomputes BurnDuration and we'd flicker - suppress the write.
         if (CorrectedBurnState.WorkerFixEnabled)
         {
+            SimTime ignitionTime = fc.Burn.ImpulsiveInstant - 0.5 * (double)corrected.Value;
+
             fc.Burn.BurnDuration = corrected.Value;
-            fc.Burn.IgnitionTime = fc.Burn.ImpulsiveInstant - 0.5 * (double)fc.Burn.BurnDuration;
+            fc.Burn.IgnitionTime = ignitionTime;
 
             CorrectedBurnState.CorrectedDuration = corrected.Value;
+            CorrectedBurnState.CorrectedIgnitionTime = ignitionTime;
             CorrectedBurnState.TrackedBurn = fc.Burn;
         }
 
@@ -86,7 +99,7 @@ static class Patch_CorrectedBurnDuration
 /// so auto-burn IgnitionTime leads the impulsive instant correctly.
 /// Auto mode only; Manual keeps the throttle-adjusted stock duration.
 /// </summary>
-static class Patch_WorkerIgnitionTiming
+internal static class Patch_WorkerIgnitionTiming
 {
     public static void Postfix(FlightComputer __instance)
     {
@@ -102,6 +115,6 @@ static class Patch_WorkerIgnitionTiming
         if (duration <= 0f) return;
 
         burn.BurnDuration = duration;
-        burn.IgnitionTime = burn.ImpulsiveInstant - 0.5 * (double)duration;
+        burn.IgnitionTime = CorrectedBurnState.CorrectedIgnitionTime;
     }
 }
