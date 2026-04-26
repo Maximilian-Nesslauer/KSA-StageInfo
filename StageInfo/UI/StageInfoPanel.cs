@@ -23,6 +23,9 @@ internal static class StageInfoPanel
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     private static readonly ImColor8 ColorInsufficient = new ImColor8(255, 60, 60, 255);
+    private static readonly ImColor8 ColorRcsBar = new ImColor8(70, 150, 230, 255);
+    private static readonly ImColor8 ColorRcsLow = new ImColor8(230, 90, 60, 255);
+    private const float RcsBarLowFraction = 0.2f;
 
     private static MethodInvoker? _drawThruster;
     private static MethodInvoker? _drawEngine;
@@ -77,7 +80,8 @@ internal static class StageInfoPanel
         DrawModeSelector();
 
         bool hasSecondary = AnalysisCache.SecondarySequences != null;
-        float footerLines = hasSecondary ? 2f : 1f;
+        bool hasRcsFooter = AnalysisCache.Rcs is { HasRcs: true, DeltaV: > 0f };
+        float footerLines = (hasSecondary ? 2f : 1f) + (hasRcsFooter ? 1f : 0f);
         float footerHeight = ImGui.GetTextLineHeightWithSpacing() * footerLines + 4f;
         float tableHeight = ImGui.GetContentRegionAvail().Y - footerHeight;
         if (tableHeight < 50f)
@@ -262,8 +266,7 @@ internal static class StageInfoPanel
             bool expanded = ImGui.TreeNodeEx(header, treeFlags);
             stage.Highlight = ImGui.IsItemHovered();
 
-            if (AnalysisCache.TryGetStageFuelInfo(stage.Number, out var info) && info.MaxFuelMass > 0f)
-                DrawFuelProgressBar(info.FuelFraction);
+            DrawStageHeaderBars(stage.Number);
 
             if (expanded)
             {
@@ -277,6 +280,94 @@ internal static class StageInfoPanel
             }
 
             ImGui.PopStyleColor();
+        }
+    }
+
+    // RCS bar shows only substances no active main engine can consume;
+    // shared tanks are already on the fuel bar.
+    private static void DrawStageHeaderBars(int stageNumber)
+    {
+        bool hasFuel = AnalysisCache.TryGetStageFuelInfo(stageNumber, out var fuelInfo)
+            && fuelInfo.MaxFuelMass > 0f;
+        bool hasRcs = AnalysisCache.TryGetStageRcsInfo(stageNumber, out var rcsInfo)
+            && rcsInfo.MaxMass > 0f;
+
+        if (!hasFuel && !hasRcs)
+            return;
+
+        // SameLine() committed up front because GetContentRegionAvail() needs
+        // the post-tree-node cursor to report the row's remaining width. If
+        // the squeeze drops both bars below threshold we return without a
+        // widget; an unbound SameLine is harmless.
+        ImGui.SameLine();
+        float availWidth = ImGui.GetContentRegionAvail().X;
+        float fuelTextWidth = ImGui.CalcTextSize("100% fuel"u8).X + 8f;
+        float rcsTextWidth = ImGui.CalcTextSize("RCS 100%"u8).X + 8f;
+
+        float fuelBarWidth = 0f;
+        float rcsBarWidth = 0f;
+
+        if (hasFuel && hasRcs)
+        {
+            float remaining = availWidth - fuelTextWidth - rcsTextWidth;
+            if (remaining < 60f)
+            {
+                // Squeezed window: drop RCS, keep fuel bar full width.
+                hasRcs = false;
+                fuelBarWidth = availWidth - fuelTextWidth;
+            }
+            else
+            {
+                fuelBarWidth = remaining * 0.7f;
+                rcsBarWidth = remaining - fuelBarWidth;
+            }
+        }
+        else if (hasFuel)
+        {
+            fuelBarWidth = availWidth - fuelTextWidth;
+        }
+        else
+        {
+            rcsBarWidth = availWidth - rcsTextWidth;
+        }
+
+        bool renderFuel = hasFuel && fuelBarWidth >= 30f;
+        bool renderRcs = hasRcs && rcsBarWidth >= 30f;
+        if (!renderFuel && !renderRcs)
+            return;
+
+        ImGui.SameLine();
+        float lineHeight = ImGui.GetTextLineHeight();
+        float barHeight = lineHeight * 0.6f;
+        float yOffset = (lineHeight - barHeight) * 0.5f;
+        float2 cursorStart = ImGui.GetCursorPos();
+
+        if (renderFuel)
+        {
+            ImGui.SetCursorPos(new float2(cursorStart.X, cursorStart.Y + yOffset));
+            ImGui.ProgressBar(fuelInfo.FuelFraction,
+                new float2?(new float2(fuelBarWidth, barHeight)), ""u8);
+            ImGui.SameLine();
+            ImGui.SetCursorPosY(cursorStart.Y);
+            ImGui.Text(string.Format(Inv, "{0}% fuel",
+                (int)MathF.Round(fuelInfo.FuelFraction * 100f)));
+        }
+
+        if (renderRcs)
+        {
+            if (renderFuel) ImGui.SameLine();
+            float2 cur = ImGui.GetCursorPos();
+            ImGui.SetCursorPos(new float2(cur.X, cursorStart.Y + yOffset));
+            ImColor8 barColor = rcsInfo.FuelFraction < RcsBarLowFraction
+                ? ColorRcsLow : ColorRcsBar;
+            ImGui.PushStyleColor(ImGuiCol.PlotHistogram, barColor);
+            ImGui.ProgressBar(rcsInfo.FuelFraction,
+                new float2?(new float2(rcsBarWidth, barHeight)), ""u8);
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            ImGui.SetCursorPosY(cursorStart.Y);
+            ImGui.Text(string.Format(Inv, "RCS {0}%",
+                (int)MathF.Round(rcsInfo.FuelFraction * 100f)));
         }
     }
 
@@ -404,6 +495,20 @@ internal static class StageInfoPanel
             DrawInfoSegment(string.Format(Inv, "Fuel: {0:N0}/{1:N0} kg", v.CurrentFuelMass, v.MaxFuelMass),
                 ref lineX, availWidth, spacing, isFirst: false);
 
+        if (AnalysisCache.TryGetStageRcsInfo(stageNumber, out var rcs)
+            && rcs.Substances != null && rcs.Substances.Count > 0)
+        {
+            DrawInfoSegment("RCS:", ref lineX, availWidth, spacing, isFirst: false);
+            for (int i = 0; i < rcs.Substances.Count; i++)
+            {
+                RcsSubstanceInfo s = rcs.Substances[i];
+                string segText = string.Format(Inv, "{0} {1:N0}/{2:N0} kg",
+                    s.ShortName, s.CurrentMass, s.MaxMass);
+                DrawInfoSegment(segText, ref lineX, availWidth, spacing, isFirst: false);
+                DrawSubstanceTooltip(s);
+            }
+        }
+
         if (v.EngineCount > 0)
             DrawInfoSegment(string.Format(Inv, "Engines: {0}", v.EngineCount),
                 ref lineX, availWidth, spacing, isFirst: false);
@@ -461,6 +566,53 @@ internal static class StageInfoPanel
                 AnalysisCache.SecondaryBurnAnalysis,
                 AnalysisCache.SecondaryLabel ?? "", secondaryDimmed);
         }
+
+        var rcs = AnalysisCache.Rcs;
+        if (rcs is { HasRcs: true, DeltaV: > 0f })
+            DrawRcsFooterLine(rcs.Value);
+    }
+
+    private static void DrawRcsFooterLine(VehicleRcsAnalysis rcs)
+    {
+        bool lowFraction = rcs.TotalMaxMass > 0f
+            && rcs.TotalCurrentMass / rcs.TotalMaxMass < RcsBarLowFraction;
+        if (lowFraction)
+            ImGui.PushStyleColor(ImGuiCol.Text, ColorRcsLow);
+
+        ImGui.Text(string.Format(Inv, "RCS dV ~{0:N0} m/s", rcs.DeltaV));
+        DrawRcsEngineeringTooltip(rcs);
+
+        if (lowFraction)
+            ImGui.PopStyleColor();
+    }
+
+    private static void DrawRcsEngineeringTooltip(VehicleRcsAnalysis rcs)
+    {
+        if (!ImGui.IsItemHovered())
+            return;
+
+        float ispS = rcs.ExhaustVelocity / (float)KSA.Constants.STANDARD_GRAVITY;
+        ImGui.BeginTooltip();
+        ImGui.Text(string.Format(Inv, "Effective ISP: ~{0:N0} s", ispS));
+        ImGui.Text(string.Format(Inv, "Vehicle propellant: {0:N0} / {1:N0} kg",
+            rcs.TotalCurrentMass, rcs.TotalMaxMass));
+        ImGui.Text(string.Format(Inv, "Scalar peak thrust: {0:N1} kN",
+            rcs.TotalThrustMax / 1000f));
+        ImGui.Text("(upper bound; assumes prograde-only burn)");
+        ImGui.EndTooltip();
+    }
+
+    private static void DrawSubstanceTooltip(RcsSubstanceInfo s)
+    {
+        if (!ImGui.IsItemHovered())
+            return;
+
+        float frac = s.MaxMass > 0f ? s.CurrentMass / s.MaxMass : 0f;
+        ImGui.BeginTooltip();
+        ImGui.Text(s.Name);
+        ImGui.Text(string.Format(Inv, "{0:N0} / {1:N0} kg ({2:P0})",
+            s.CurrentMass, s.MaxMass, frac));
+        ImGui.EndTooltip();
     }
 
     private static void DrawTotalLine(VehicleBurnAnalysis sequences, BurnAnalysis? burnAnalysis,

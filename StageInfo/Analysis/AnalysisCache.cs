@@ -95,6 +95,15 @@ internal static class AnalysisCache
     private static readonly List<StageFuelInfo> _cachedStageList = new();
     private static readonly Dictionary<int, StageFuelInfo> _stageLookup = new();
 
+    private static VehicleRcsAnalysis? _cachedRcs;
+    private static readonly List<StageRcsInfo> _cachedRcsStageList = new();
+    private static readonly Dictionary<int, StageRcsInfo> _rcsStageLookup = new();
+
+    // Separate pool from the analyzer's. The analyzer recycles its lists on
+    // every Analyze call, so the cache must hold its own copies until then.
+    private static readonly Stack<List<RcsSubstanceInfo>> _cachedStageSubstancePool = new();
+    private static readonly List<List<RcsSubstanceInfo>> _activeCachedStageSubstanceLists = new();
+
     public static string PrimaryLabel { get; private set; } = "";
     public static string? SecondaryLabel { get; private set; }
     public static bool IsPrimaryCurrentCondition { get; private set; } = true;
@@ -113,6 +122,7 @@ internal static class AnalysisCache
     public static VehicleBurnAnalysis? SecondarySequences => _secondary.Sequences;
     public static BurnAnalysis? SecondaryBurnAnalysis => _secondary.Burn;
     public static VehicleFuelAnalysis? Stages => _cachedStages;
+    public static VehicleRcsAnalysis? Rcs => _cachedRcs;
 
     public static bool TryGetSequenceInfo(int sequenceNumber, out SequenceBurnInfo info)
         => _primary.SequenceLookup.TryGetValue(sequenceNumber, out info);
@@ -128,6 +138,9 @@ internal static class AnalysisCache
 
     public static bool TryGetStageFuelInfo(int stageNumber, out StageFuelInfo info)
         => _stageLookup.TryGetValue(stageNumber, out info);
+
+    public static bool TryGetStageRcsInfo(int stageNumber, out StageRcsInfo info)
+        => _rcsStageLookup.TryGetValue(stageNumber, out info);
 
     public static float? GetCorrectedBurnDuration() => _primary.Burn?.TotalBurnTime;
 
@@ -159,9 +172,15 @@ internal static class AnalysisCache
             _secondary.Clear();
 
         if (panelActive)
+        {
             RunStageAnalysis(vehicle);
+            RunRcsAnalysis(vehicle, env.PrimaryPressure);
+        }
         else
+        {
             ClearStages();
+            ClearRcs();
+        }
 
         float requiredDv = hasBurn ? vehicle.FlightComputer.Burn!.DeltaVToGoCci.Length() : 0f;
         if (requiredDv > 0f)
@@ -184,6 +203,7 @@ internal static class AnalysisCache
     public static void Reset()
     {
         ClearAll();
+        _cachedStageSubstancePool.Clear();
         _panelNeedsData = false;
         PrimaryLabel = "";
         SecondaryLabel = null;
@@ -210,10 +230,81 @@ internal static class AnalysisCache
         _stageLookup.Clear();
     }
 
+    private static void RunRcsAnalysis(Vehicle vehicle, float ambientPressure)
+    {
+        var result = RcsAnalyzer.Analyze(vehicle, ambientPressure);
+
+        ReturnCachedStageSubstanceLists();
+        _cachedRcsStageList.Clear();
+        for (int i = 0; i < result.Stages.Count; i++)
+        {
+            // record struct value semantics: rebinding Substances on `stage`
+            // and adding it to the cache list carries the new reference along.
+            StageRcsInfo stage = result.Stages[i];
+            if (stage.Substances != null && stage.Substances.Count > 0)
+            {
+                List<RcsSubstanceInfo> copy = RentCachedStageSubstanceList();
+                copy.AddRange(stage.Substances);
+                stage.Substances = copy;
+            }
+            else
+            {
+                stage.Substances = null;
+            }
+            _cachedRcsStageList.Add(stage);
+        }
+
+        _cachedRcs = new VehicleRcsAnalysis
+        {
+            HasRcs = result.HasRcs,
+            Stages = _cachedRcsStageList,
+            TotalCurrentMass = result.TotalCurrentMass,
+            TotalMaxMass = result.TotalMaxMass,
+            TotalThrustMax = result.TotalThrustMax,
+            TotalMassFlowMax = result.TotalMassFlowMax,
+            ExhaustVelocity = result.ExhaustVelocity,
+            DeltaV = result.DeltaV
+        };
+
+        _rcsStageLookup.Clear();
+        foreach (var s in _cachedRcsStageList)
+            _rcsStageLookup[s.StageNumber] = s;
+    }
+
+    private static List<RcsSubstanceInfo> RentCachedStageSubstanceList()
+    {
+        List<RcsSubstanceInfo> list = _cachedStageSubstancePool.Count > 0
+            ? _cachedStageSubstancePool.Pop()
+            : new List<RcsSubstanceInfo>();
+        list.Clear();
+        _activeCachedStageSubstanceLists.Add(list);
+        return list;
+    }
+
+    private static void ReturnCachedStageSubstanceLists()
+    {
+        for (int i = 0; i < _activeCachedStageSubstanceLists.Count; i++)
+        {
+            var list = _activeCachedStageSubstanceLists[i];
+            list.Clear();
+            _cachedStageSubstancePool.Push(list);
+        }
+        _activeCachedStageSubstanceLists.Clear();
+    }
+
+    private static void ClearRcs()
+    {
+        _cachedRcs = null;
+        ReturnCachedStageSubstanceLists();
+        _cachedRcsStageList.Clear();
+        _rcsStageLookup.Clear();
+    }
+
     private static void ClearAll()
     {
         _primary.Clear();
         _secondary.Clear();
         ClearStages();
+        ClearRcs();
     }
 }

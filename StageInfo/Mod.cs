@@ -84,6 +84,7 @@ public sealed class Mod
         CorrectedBurnState.WorkerFixEnabled = false;
         SequenceAnalyzer.ResetPools();
         StageFuelAnalyzer.ResetPools();
+        RcsAnalyzer.ResetPools();
 #if DEBUG
         PerfTracker.Reset();
 #endif
