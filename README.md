@@ -28,6 +28,16 @@ Validated against KSA build version 2026.4.17.4184.
   each Sequence row.
 - **Per-stage fuel pool, mass, engine count, decoupler count** on each
   Stage row.
+- **Per-stage RCS bar** in the stage header next to the fuel bar (blue,
+  turns red below 20%). Substances no active main engine can consume
+  are listed in the expanded stage detail (e.g. `MMH 1,180/1,761 kg
+  NTO 1,888/2,817 kg`) with a hover tooltip for the full substance name
+  and current/max mass. Shared tanks (e.g. LFOX feeding both the main
+  engine and a vernier thruster) stay on the main fuel bar so nothing
+  is counted twice.
+- **RCS dV budget** as a footer line (`RCS dV ~X m/s`). Hover for an
+  engineering tooltip listing effective ISP, total propellant, and
+  scalar peak thrust.
 - **Display modes** Auto / VAC / ASL / VAC+ASL / Planning for previewing
   dV under different ambient conditions (Planning lets you pick any
   celestial body in the current system).
