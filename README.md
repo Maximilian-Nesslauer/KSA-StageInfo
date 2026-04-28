@@ -20,7 +20,7 @@ a totals footer and a multi-stage-aware burn duration for auto-burns.
 
 This mod is written against the [StarMap loader](https://github.com/StarMapLoader/StarMap).
 
-Validated against KSA build version 2026.4.17.4184.
+Validated against KSA build version 2026.4.18.4206.
 
 ## Features
 
