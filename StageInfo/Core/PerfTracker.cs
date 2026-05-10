@@ -7,11 +7,9 @@ namespace StageInfo.Core;
 
 /// <summary>
 /// Per-method Stopwatch accumulator (DEBUG only). Reports count/avg/min/max
-/// every <see cref="ReportIntervalSeconds"/>.
-///
-/// Entries hold per-interval totals (count / total / min / max). They are
-/// cleared on each report, so each line in the log covers only the previous
-/// interval, not the whole session.
+/// every <see cref="ReportIntervalSeconds"/>. Entries are cleared on each
+/// report, so each log line covers only the previous interval.
+/// Main thread only; no synchronization.
 /// </summary>
 internal static class PerfTracker
 {

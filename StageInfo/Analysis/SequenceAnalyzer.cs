@@ -111,17 +111,8 @@ internal static class SequenceAnalyzer
         ReadOnlySpan<MoleState> moleStates = vehicle.Parts.Moles.States;
         float currentMass = vehicle.TotalMass;
 
-        float surfaceGravity;
-        if (surfaceGravityOverride.HasValue)
-        {
-            surfaceGravity = surfaceGravityOverride.Value;
-        }
-        else
-        {
-            double parentMass = vehicle.Parent?.Mass ?? 0.0;
-            double parentRadius = vehicle.Parent?.MeanRadius ?? 1.0;
-            surfaceGravity = (float)(Constants.GRAVITATIONAL_CONSTANT * parentMass / (parentRadius * parentRadius));
-        }
+        float surfaceGravity = surfaceGravityOverride
+            ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
 
         if (log)
         {
@@ -443,13 +434,15 @@ internal static class SequenceAnalyzer
         Span<MemoryOwner<Tank>> nodeSpan = nodes.Span;
         for (int i = 0; i < nodeSpan.Length; i++)
         {
-            if (nodeSpan[i].Length == 0)
+            if (nodeSpan[i] == null || nodeSpan[i].Length == 0)
                 continue;
 
             Span<Tank> tanks = nodeSpan[i].Span;
             for (int j = 0; j < tanks.Length; j++)
             {
                 Tank tank = tanks[j];
+                if (tank == null)
+                    continue;
 
                 if (!fuelClaimedTankIds.Add(tank.InstanceId))
                     continue;

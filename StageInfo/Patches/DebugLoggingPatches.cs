@@ -1,3 +1,4 @@
+using System.Reflection;
 using Brutal.Logging;
 using HarmonyLib;
 using KSA;
@@ -34,9 +35,11 @@ internal static class DebugLoggingPatches
         }
     }
 
-    [HarmonyPatch(typeof(Vehicle), "UpdateFromTaskResults")]
+    [HarmonyPatch]
     internal static class Patch_InitialAnalysis
     {
+        static MethodBase TargetMethod() => GameReflection.Vehicle_UpdateFromTaskResults!;
+
         static void Postfix(Vehicle __instance)
         {
             if (!DebugConfig.StageInfo) return;

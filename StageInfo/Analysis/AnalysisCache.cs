@@ -99,8 +99,8 @@ internal static class AnalysisCache
     private static readonly List<StageRcsInfo> _cachedRcsStageList = new();
     private static readonly Dictionary<int, StageRcsInfo> _rcsStageLookup = new();
 
-    // Separate pool from the analyzer's. The analyzer recycles its lists on
-    // every Analyze call, so the cache must hold its own copies until then.
+    // Must NOT alias RcsAnalyzer's pool: the analyzer recycles on every Analyze
+    // call, this cache holds the snapshot until the next RunRcsAnalysis.
     private static readonly Stack<List<RcsSubstanceInfo>> _cachedStageSubstancePool = new();
     private static readonly List<List<RcsSubstanceInfo>> _activeCachedStageSubstanceLists = new();
 
@@ -110,8 +110,7 @@ internal static class AnalysisCache
 
     /// <summary>
     /// Set by the panel each rendered frame. Read and reset by Update() to
-    /// decide whether the panel needs fresh analysis. One-frame lag on first
-    /// open is invisible.
+    /// decide whether the panel needs fresh analysis. Main thread only.
     /// </summary>
     private static bool _panelNeedsData;
 
@@ -149,11 +148,12 @@ internal static class AnalysisCache
 #if DEBUG
         long perfStart = DebugConfig.Performance ? Stopwatch.GetTimestamp() : 0;
 #endif
-        bool hasBurn = vehicle.FlightComputer.Burn != null;
+        BurnTarget? burn = vehicle.FlightComputer.Burn;
+        float requiredDv = burn != null ? burn.DeltaVToGoCci.Length() : 0f;
         bool panelActive = _panelNeedsData;
         _panelNeedsData = false;
 
-        if (!hasBurn && !panelActive)
+        if (burn == null && !panelActive)
         {
             ClearAll();
             return;
@@ -182,7 +182,6 @@ internal static class AnalysisCache
             ClearRcs();
         }
 
-        float requiredDv = hasBurn ? vehicle.FlightComputer.Burn!.DeltaVToGoCci.Length() : 0f;
         if (requiredDv > 0f)
         {
             _primary.UpdateBurnAnalysis(requiredDv);
@@ -205,9 +204,6 @@ internal static class AnalysisCache
         ClearAll();
         _cachedStageSubstancePool.Clear();
         _panelNeedsData = false;
-        PrimaryLabel = "";
-        SecondaryLabel = null;
-        IsPrimaryCurrentCondition = true;
     }
 
     private static void RunStageAnalysis(Vehicle vehicle)
@@ -238,8 +234,6 @@ internal static class AnalysisCache
         _cachedRcsStageList.Clear();
         for (int i = 0; i < result.Stages.Count; i++)
         {
-            // record struct value semantics: rebinding Substances on `stage`
-            // and adding it to the cache list carries the new reference along.
             StageRcsInfo stage = result.Stages[i];
             if (stage.Substances != null && stage.Substances.Count > 0)
             {
@@ -306,5 +300,9 @@ internal static class AnalysisCache
         _secondary.Clear();
         ClearStages();
         ClearRcs();
+
+        PrimaryLabel = "";
+        SecondaryLabel = null;
+        IsPrimaryCurrentCondition = true;
     }
 }

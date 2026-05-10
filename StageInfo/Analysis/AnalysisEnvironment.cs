@@ -18,8 +18,10 @@ internal readonly record struct AnalysisEnvironment(
 
 internal static class EnvironmentHelpers
 {
-    public static float ComputeSurfaceGravity(IParentBody body)
+    public static float ComputeSurfaceGravity(IParentBody? body)
     {
+        if (body == null)
+            return 0f;
         double r = body.MeanRadius;
         if (r <= 0.0)
             return 0f;

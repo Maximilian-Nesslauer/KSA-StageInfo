@@ -31,7 +31,19 @@ internal static class StageInfoPanel
     private static MethodInvoker? _drawEngine;
     private static MethodInvoker? _drawDecoupler;
 
-    private static readonly string[] ModeLabels = { "Auto", "VAC", "ASL", "VAC + ASL", "Planning" };
+    // Enum.GetValues<T>() allocates; cache it.
+    private static readonly StageDisplayMode[] AllModes =
+        Enum.GetValues<StageDisplayMode>();
+
+    private static string ModeLabel(StageDisplayMode mode) => mode switch
+    {
+        StageDisplayMode.Auto => "Auto",
+        StageDisplayMode.Vac => "VAC",
+        StageDisplayMode.Asl => "ASL",
+        StageDisplayMode.VacAsl => "VAC + ASL",
+        StageDisplayMode.Planning => "Planning",
+        _ => mode.ToString()
+    };
 
     /// <summary>
     /// Applies the StagingWindow.DrawContent prefix and prepares the
@@ -63,7 +75,6 @@ internal static class StageInfoPanel
 
     #region DrawContent
 
-    /// <summary>Prefix replacement; returns false so stock doesn't also run.</summary>
     static bool DrawContentPrefix(object __instance, Viewport viewport)
     {
 #if DEBUG
@@ -72,7 +83,6 @@ internal static class StageInfoPanel
         Vehicle? vehicle = Program.ControlledVehicle;
         if (vehicle == null)
             return false;
-
 
         AnalysisCache.MarkPanelActive();
 
@@ -144,15 +154,13 @@ internal static class StageInfoPanel
     {
         ImGui.PushItemWidth(110f);
 
-        string currentLabel = ModeLabels[(int)StageInfoSettings.Mode];
-
-        if (ImGui.BeginCombo("##StageInfoMode"u8, currentLabel))
+        if (ImGui.BeginCombo("##StageInfoMode"u8, ModeLabel(StageInfoSettings.Mode)))
         {
-            for (int i = 0; i < ModeLabels.Length; i++)
+            foreach (StageDisplayMode mode in AllModes)
             {
-                bool isSelected = (int)StageInfoSettings.Mode == i;
-                if (ImGui.Selectable(ModeLabels[i], isSelected))
-                    StageInfoSettings.Mode = (StageDisplayMode)i;
+                bool isSelected = StageInfoSettings.Mode == mode;
+                if (ImGui.Selectable(ModeLabel(mode), isSelected))
+                    StageInfoSettings.Mode = mode;
             }
             ImGui.EndCombo();
         }
@@ -336,7 +344,6 @@ internal static class StageInfoPanel
         if (!renderFuel && !renderRcs)
             return;
 
-        ImGui.SameLine();
         float lineHeight = ImGui.GetTextLineHeight();
         float barHeight = lineHeight * 0.6f;
         float yOffset = (lineHeight - barHeight) * 0.5f;
@@ -591,6 +598,7 @@ internal static class StageInfoPanel
         if (!ImGui.IsItemHovered())
             return;
 
+        // KSA. qualifier is needed: Brutal.ImGuiApi also exports Constants.
         float ispS = rcs.ExhaustVelocity / (float)KSA.Constants.STANDARD_GRAVITY;
         ImGui.BeginTooltip();
         ImGui.Text(string.Format(Inv, "Effective ISP: ~{0:N0} s", ispS));

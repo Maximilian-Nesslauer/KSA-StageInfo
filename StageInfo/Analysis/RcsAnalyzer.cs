@@ -63,6 +63,9 @@ internal static class RcsAnalyzer
     private static readonly HashSet<KeyHash> _rcsSubstanceHashes = new();
     private static readonly HashSet<ulong> _claimedTankIds = new();
 
+    private static readonly Comparison<StageRcsInfo> StageNumberAscending =
+        static (a, b) => a.StageNumber.CompareTo(b.StageNumber);
+
     // Reused across Analyze calls so per-frame allocations stay near zero.
     private static readonly Stack<List<RcsSubstanceInfo>> _stageSubstanceListPool = new();
     private static readonly List<List<RcsSubstanceInfo>> _activeStageSubstanceLists = new();
@@ -171,7 +174,7 @@ internal static class RcsAnalyzer
             info.FuelFraction = info.MaxMass > 0f ? info.CurrentMass / info.MaxMass : 0f;
             _pooledStages[i] = info;
         }
-        _pooledStages.Sort(static (a, b) => a.StageNumber.CompareTo(b.StageNumber));
+        _pooledStages.Sort(StageNumberAscending);
 
         result.HasRcs = _pooledStages.Count > 0
             && (result.TotalThrustMax > 0f || result.TotalMaxMass > 0f);

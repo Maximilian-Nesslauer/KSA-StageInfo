@@ -12,15 +12,23 @@ namespace StageInfo.Core;
 /// </summary>
 internal static class GameReflection
 {
+    public static readonly MethodInfo? Vehicle_UpdateFromTaskResults =
+        AccessTools.Method(typeof(Vehicle), "UpdateFromTaskResults");
+
     public static readonly Type? StagingWindowType =
         typeof(Staging).GetNestedType("StagingWindow", BindingFlags.NonPublic);
 
     public static readonly MethodInfo? StagingWindow_DrawContent =
         StagingWindowType?.GetMethod("DrawContent", BindingFlags.Public | BindingFlags.Instance);
 
-    // Open generic; features instantiate it per module type.
+    // Open generic; features instantiate it per module type. Parameter types
+    // pinned so a future overload doesn't break GetMethod with AmbiguousMatchException.
     public static readonly MethodInfo? StagingWindow_DrawComponentOpen =
-        StagingWindowType?.GetMethod("DrawComponent", BindingFlags.NonPublic | BindingFlags.Instance);
+        StagingWindowType?.GetMethod("DrawComponent",
+            BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null,
+            types: new[] { typeof(Part) },
+            modifiers: null);
 
     public static readonly MethodInfo? FlightComputer_UpdateBurnTarget =
         AccessTools.Method(typeof(FlightComputer), "UpdateBurnTarget", new[]
@@ -28,6 +36,15 @@ internal static class GameReflection
             typeof(ManualControlInputs).MakeByRefType(),
             typeof(FlightComputerOutput).MakeByRefType(),
         });
+
+    public static bool ValidateCore()
+    {
+        var targets = new (string name, object? target)[]
+        {
+            ("Vehicle.UpdateFromTaskResults", Vehicle_UpdateFromTaskResults),
+        };
+        return AllPresent(targets);
+    }
 
     public static bool ValidatePanelTargets()
     {
@@ -57,7 +74,7 @@ internal static class GameReflection
             if (target == null)
             {
                 DefaultCategory.Log.Error(
-                    $"[StageInfo] {name} not found - game version may have changed.");
+                    $"[StageInfo] {name} not found, game version may have changed.");
                 allOk = false;
             }
         }

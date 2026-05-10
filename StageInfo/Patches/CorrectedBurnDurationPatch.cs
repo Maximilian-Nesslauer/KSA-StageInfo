@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Threading;
 using HarmonyLib;
 using KSA;
@@ -29,15 +30,24 @@ internal static class CorrectedBurnState
         set => Volatile.Write(ref _correctedIgnitionTimeSeconds, value.Seconds());
     }
 
-    // False when the worker patch didn't apply; we then suppress main-thread
-    // writes to fc.Burn to avoid single-frame flicker from the stock recompute.
+    // Set once at load, cleared at unload; not read from worker thread.
+    // False when the worker patch didn't apply; main-thread writes to fc.Burn
+    // are then suppressed to avoid flicker from the stock recompute.
     internal static bool WorkerFixEnabled;
 
-    internal static void Clear()
+    /// <summary>Resets only the per-burn state; WorkerFixEnabled persists.</summary>
+    internal static void ClearBurn()
     {
         TrackedBurn = null;
         CorrectedDuration = 0f;
         Volatile.Write(ref _correctedIgnitionTimeSeconds, 0.0);
+    }
+
+    /// <summary>Full reset for mod unload.</summary>
+    internal static void ResetForUnload()
+    {
+        ClearBurn();
+        WorkerFixEnabled = false;
     }
 }
 
@@ -45,9 +55,11 @@ internal static class CorrectedBurnState
 /// Drives the analysis cache and writes the corrected BurnDuration /
 /// IgnitionTime for the controlled vehicle.
 /// </summary>
-[HarmonyPatch(typeof(Vehicle), "UpdateFromTaskResults")]
+[HarmonyPatch]
 internal static class Patch_CorrectedBurnDuration
 {
+    static MethodBase TargetMethod() => GameReflection.Vehicle_UpdateFromTaskResults!;
+
     static void Postfix(Vehicle __instance)
     {
 #if DEBUG
@@ -60,14 +72,14 @@ internal static class Patch_CorrectedBurnDuration
         FlightComputer fc = __instance.FlightComputer;
         if (fc.Burn == null)
         {
-            CorrectedBurnState.Clear();
+            CorrectedBurnState.ClearBurn();
             return;
         }
 
         float? corrected = AnalysisCache.GetCorrectedBurnDuration();
         if (corrected == null || corrected.Value <= 0f)
         {
-            CorrectedBurnState.Clear();
+            CorrectedBurnState.ClearBurn();
             return;
         }
 
@@ -77,12 +89,17 @@ internal static class Patch_CorrectedBurnDuration
         {
             SimTime ignitionTime = fc.Burn.ImpulsiveInstant - 0.5 * (double)corrected.Value;
 
-            fc.Burn.BurnDuration = corrected.Value;
-            fc.Burn.IgnitionTime = ignitionTime;
-
             CorrectedBurnState.CorrectedDuration = corrected.Value;
             CorrectedBurnState.CorrectedIgnitionTime = ignitionTime;
             CorrectedBurnState.TrackedBurn = fc.Burn;
+
+            // Auto only: in Manual mode, stock divides BurnDuration by EngineThrottle,
+            // so our full-throttle correction would flicker against the stock recompute.
+            if (fc.BurnMode == FlightComputerBurnMode.Auto)
+            {
+                fc.Burn.BurnDuration = corrected.Value;
+                fc.Burn.IgnitionTime = ignitionTime;
+            }
         }
 
 #if DEBUG

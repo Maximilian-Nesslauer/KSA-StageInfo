@@ -117,12 +117,11 @@ internal static class StageInfoSettings
 
     private static AnalysisEnvironment ResolvePlanningEnvironment(Vehicle vehicle)
     {
-        // Default selection on first resolve so the combo has a sensible initial value.
+        // Lazy default: at mod load Universe.CurrentSystem may not exist yet.
         if (SelectedBodyId == null)
         {
             var bodies = GetCelestialBodies();
-            if (bodies.Count > 0)
-                SelectedBodyId = bodies[0].Id;
+            if (bodies.Count > 0) SelectedBodyId = bodies[0].Id;
         }
 
         IParentBody? body = FindSelectedBody();

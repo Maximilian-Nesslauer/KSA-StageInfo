@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Brutal.Logging;
 using KSA;
 using StageInfo.Core;
 
@@ -31,10 +32,16 @@ internal static class StageFuelAnalyzer
     private static readonly List<StageFuelInfo> _pooledStages = new();
     private static readonly Dictionary<int, int> _stageIndex = new();
 
+    private static readonly Comparison<StageFuelInfo> StageNumberAscending =
+        static (a, b) => a.StageNumber.CompareTo(b.StageNumber);
+
+    private static bool _warnedMissingStage;
+
     public static void ResetPools()
     {
         _pooledStages.Clear();
         _stageIndex.Clear();
+        _warnedMissingStage = false;
     }
 
     public static VehicleFuelAnalysis Analyze(Vehicle vehicle)
@@ -63,6 +70,14 @@ internal static class StageFuelAnalyzer
             int stageNum = part.Stage;
             if (!_stageIndex.TryGetValue(stageNum, out int idx))
             {
+
+                if (!_warnedMissingStage)
+                {
+                    _warnedMissingStage = true;
+                    DefaultCategory.Log.Warning(
+                        $"[StageInfo] StageFuelAnalyzer: part.Stage={stageNum} not in " +
+                        "StageList.Stages, recovering. (logged once per session)");
+                }
                 idx = _pooledStages.Count;
                 _stageIndex[stageNum] = idx;
                 _pooledStages.Add(new StageFuelInfo { StageNumber = stageNum });
@@ -92,7 +107,7 @@ internal static class StageFuelAnalyzer
             _pooledStages[i] = info;
         }
 
-        _pooledStages.Sort(static (a, b) => a.StageNumber.CompareTo(b.StageNumber));
+        _pooledStages.Sort(StageNumberAscending);
 
 #if DEBUG
         if (DebugConfig.Performance)

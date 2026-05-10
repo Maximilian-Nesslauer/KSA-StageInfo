@@ -28,6 +28,19 @@ public sealed class Mod
 
         _harmony = new Harmony("com.maxi.stageinfo");
 
+#if DEBUG
+        // Anchor the first reporting interval at mod load, not at type init.
+        PerfTracker.Reset();
+#endif
+
+        bool coreOk = GameReflection.ValidateCore();
+        if (!coreOk)
+        {
+            DefaultCategory.Log.Warning(
+                "[StageInfo] Disabled, Vehicle.UpdateFromTaskResults not found.");
+            return;
+        }
+
         bool panelOk = GameReflection.ValidatePanelTargets();
         bool burnOk = GameReflection.ValidateBurnTarget();
 
@@ -38,7 +51,7 @@ public sealed class Mod
         else
         {
             DefaultCategory.Log.Warning(
-                "[StageInfo] Panel disabled - StagingWindow targets not found.");
+                "[StageInfo] Panel disabled, StagingWindow targets not found.");
         }
 
         // Drives the cache for the controlled vehicle; writes corrected BurnDuration
@@ -56,7 +69,7 @@ public sealed class Mod
         {
             CorrectedBurnState.WorkerFixEnabled = false;
             DefaultCategory.Log.Warning(
-                "[StageInfo] FlightComputer.UpdateBurnTarget not found - burn duration correction disabled " +
+                "[StageInfo] FlightComputer.UpdateBurnTarget not found, burn duration correction disabled " +
                 "(cache still drives the panel, but fc.Burn is not modified).");
         }
 
@@ -80,8 +93,7 @@ public sealed class Mod
         DebugLoggingPatches.Reset();
         AnalysisCache.Reset();
         StageInfoSettings.Reset();
-        CorrectedBurnState.Clear();
-        CorrectedBurnState.WorkerFixEnabled = false;
+        CorrectedBurnState.ResetForUnload();
         SequenceAnalyzer.ResetPools();
         StageFuelAnalyzer.ResetPools();
         RcsAnalyzer.ResetPools();
