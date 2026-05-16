@@ -29,7 +29,7 @@ internal static class StageInfoSettings
 
     public static AnalysisEnvironment ResolveEnvironment(Vehicle vehicle)
     {
-        float currentPressure = vehicle.LastKinematicStates.AtmosphericPressure;
+        float currentPressure = vehicle.KinematicStates.AtmosphericPressure;
         bool inAtmosphere = currentPressure > 0f;
 
         return Mode switch
