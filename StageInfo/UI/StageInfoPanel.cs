@@ -106,7 +106,11 @@ internal static class StageInfoPanel
 
         if (!ImGui.BeginTable("stagesequences"u8, 1, flags,
                 new float2?(new float2(0f, tableHeight))))
-            return false;
+        {
+            // BeginTable can fail in degenerate layouts; let stock try its
+            // own version so the window isn't blank below the mode selector.
+            return true;
+        }
 
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn(vehicle.Id, ImGuiTableColumnFlags.NoHide);
