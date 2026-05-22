@@ -12,8 +12,16 @@ namespace StageInfo.Core;
 /// </summary>
 internal static class GameReflection
 {
+    // Parameter types pinned so a future overload doesn't make AccessTools.Method
+    // throw AmbiguousMatchException out of this type initializer, which would
+    // bypass ValidateCore's graceful disable path.
     public static readonly MethodInfo? Vehicle_UpdateFromTaskResults =
-        AccessTools.Method(typeof(Vehicle), "UpdateFromTaskResults");
+        AccessTools.Method(typeof(Vehicle), "UpdateFromTaskResults", new[]
+        {
+            typeof(VehicleUpdateData).MakeByRefType(),
+            typeof(Vehicle),
+            typeof(ReadOnlySpan<Vehicle>),
+        });
 
     public static readonly Type? StagingWindowType =
         typeof(Staging).GetNestedType("StagingWindow", BindingFlags.NonPublic);
