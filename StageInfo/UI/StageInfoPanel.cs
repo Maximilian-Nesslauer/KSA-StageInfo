@@ -50,7 +50,7 @@ internal static class StageInfoPanel
         StageDisplayMode.Asl => "ASL",
         StageDisplayMode.VacAsl => "VAC + ASL",
         StageDisplayMode.Planning => "Planning",
-        _ => mode.ToString()
+        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unhandled StageDisplayMode"),
     };
 
     /// <summary>
