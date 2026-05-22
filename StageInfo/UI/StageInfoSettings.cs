@@ -117,14 +117,21 @@ internal static class StageInfoSettings
 
     private static AnalysisEnvironment ResolvePlanningEnvironment(Vehicle vehicle)
     {
-        // Lazy default: at mod load Universe.CurrentSystem may not exist yet.
-        if (SelectedBodyId == null)
+        IParentBody? body = FindSelectedBody();
+        if (body == null)
         {
+            // Either SelectedBodyId is unset (first run, Universe wasn't ready
+            // at mod load) or the saved id doesn't exist in the current system
+            // (system change). Snap to the first available body so we never
+            // silently fall through to VAC when planning is actually possible.
             var bodies = GetCelestialBodies();
-            if (bodies.Count > 0) SelectedBodyId = bodies[0].Id;
+            if (bodies.Count > 0)
+            {
+                SelectedBodyId = bodies[0].Id;
+                body = bodies[0] as IParentBody;
+            }
         }
 
-        IParentBody? body = FindSelectedBody();
         if (body == null)
         {
             return new AnalysisEnvironment(0f, null, null, null, "(VAC)", null, true);
