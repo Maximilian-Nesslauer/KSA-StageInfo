@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Reflection;
-using System.Threading;
 using HarmonyLib;
 using KSA;
 using StageInfo.Analysis;
@@ -10,9 +9,11 @@ namespace StageInfo.Patches;
 
 /// <summary>
 /// Handoff from the main-thread writer to the worker-thread reader for the
-/// corrected burn duration and ignition time.
+/// corrected burn duration. The worker recomputes IgnitionTime from the burn's
+/// current ImpulsiveInstant, so a maneuver-node edit between main snapshot
+/// and worker apply doesn't write a stale ignition.
 ///
-/// One-frame staleness is fine because dV consumed per frame is tiny.
+/// One-frame staleness on duration is fine because dV consumed per frame is tiny.
 /// </summary>
 internal static class CorrectedBurnState
 {
@@ -21,14 +22,6 @@ internal static class CorrectedBurnState
     internal static volatile BurnTarget? TrackedBurn;
 
     internal static volatile float CorrectedDuration;
-
-    private static double _correctedIgnitionTimeSeconds;
-
-    internal static SimTime CorrectedIgnitionTime
-    {
-        get => new SimTime(Volatile.Read(ref _correctedIgnitionTimeSeconds));
-        set => Volatile.Write(ref _correctedIgnitionTimeSeconds, value.Seconds());
-    }
 
     // Set once at load, cleared at unload; not read from worker thread.
     // False when the worker patch didn't apply; main-thread writes to fc.Burn
@@ -40,7 +33,6 @@ internal static class CorrectedBurnState
     {
         TrackedBurn = null;
         CorrectedDuration = 0f;
-        Volatile.Write(ref _correctedIgnitionTimeSeconds, 0.0);
     }
 
     /// <summary>Full reset for mod unload.</summary>
@@ -87,10 +79,7 @@ internal static class Patch_CorrectedBurnDuration
         // recomputes BurnDuration and we'd flicker - suppress the write.
         if (CorrectedBurnState.WorkerFixEnabled)
         {
-            SimTime ignitionTime = fc.Burn.ImpulsiveInstant - 0.5 * (double)corrected.Value;
-
             CorrectedBurnState.CorrectedDuration = corrected.Value;
-            CorrectedBurnState.CorrectedIgnitionTime = ignitionTime;
             CorrectedBurnState.TrackedBurn = fc.Burn;
 
             // Auto only: in Manual mode, stock divides BurnDuration by EngineThrottle,
@@ -98,7 +87,7 @@ internal static class Patch_CorrectedBurnDuration
             if (fc.BurnMode == FlightComputerBurnMode.Auto)
             {
                 fc.Burn.BurnDuration = corrected.Value;
-                fc.Burn.IgnitionTime = ignitionTime;
+                fc.Burn.IgnitionTime = fc.Burn.ImpulsiveInstant - 0.5 * (double)corrected.Value;
             }
         }
 
@@ -132,6 +121,9 @@ internal static class Patch_WorkerIgnitionTiming
         if (duration <= 0f) return;
 
         burn.BurnDuration = duration;
-        burn.IgnitionTime = CorrectedBurnState.CorrectedIgnitionTime;
+        // Recompute from the burn's current ImpulsiveInstant so a maneuver-node
+        // edit between the main-thread snapshot and this worker call doesn't
+        // write a stale IgnitionTime. Mirrors stock's UpdateBurnTarget formula.
+        burn.IgnitionTime = burn.ImpulsiveInstant - 0.5 * (double)duration;
     }
 }
