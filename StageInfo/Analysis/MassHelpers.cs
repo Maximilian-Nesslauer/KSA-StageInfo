@@ -25,14 +25,25 @@ internal static class MassHelpers
         return mass;
     }
 
-    /// <summary>Tank capacity in kg, derived from the per-mole liquid density
-    /// and container volume. Stable for nearly-empty tanks where dividing the
+    /// <summary>Tank capacity in kg, derived from each mole's density and
+    /// container volume. Stable for nearly-empty tanks where dividing the
     /// current mass by the filled fraction would underestimate.</summary>
     public static float ComputeTankMaxMass(Tank tank)
     {
         float maxMass = 0f;
         foreach (Mole mole in tank.Moles)
-            maxMass += mole.GetLiquidMass(mole.ContainerVolume);
+            maxMass += ComputeMoleMaxMass(mole);
         return maxMass;
     }
+
+    // Stock Mole.GetLiquidMass returns 0 for non-liquid phases, so a Solid
+    // mole would report 0 max even when state.Mass is non-zero. Currently
+    // dormant because Tank.ConfigureFor sets ContainerVolume=0 for non-Liquid
+    // moles, but kept defensive against a future solid propellant.
+    private static float ComputeMoleMaxMass(Mole mole) => mole.SubstancePhase switch
+    {
+        Liquid liquid => liquid.ComputeMass(mole.ContainerVolume),
+        Solid solid => solid.ComputeMass(mole.ContainerVolume),
+        _ => 0f,
+    };
 }
