@@ -16,7 +16,6 @@ internal static class PerfTracker
     private const double ReportIntervalSeconds = 5.0;
 
     private static readonly Dictionary<string, PerfData> _entries = new();
-    private static readonly List<string> _orderedKeys = new();
     private static long _lastReportTimestamp = Stopwatch.GetTimestamp();
 
     private struct PerfData
@@ -46,7 +45,6 @@ internal static class PerfTracker
                 MinTicks = elapsedTicks,
                 MaxTicks = elapsedTicks
             };
-            _orderedKeys.Add(name);
         }
 
         MaybeReport();
@@ -61,9 +59,9 @@ internal static class PerfTracker
 
         _lastReportTimestamp = now;
 
-        foreach (string key in _orderedKeys)
+        foreach (var (key, data) in _entries)
         {
-            if (!_entries.TryGetValue(key, out var data) || data.Count == 0)
+            if (data.Count == 0)
                 continue;
 
             double avgMs = TicksToMs(data.TotalTicks / data.Count);
@@ -77,7 +75,6 @@ internal static class PerfTracker
         }
 
         _entries.Clear();
-        _orderedKeys.Clear();
     }
 
     private static double TicksToMs(long ticks)
@@ -88,7 +85,6 @@ internal static class PerfTracker
     public static void Reset()
     {
         _entries.Clear();
-        _orderedKeys.Clear();
         _lastReportTimestamp = Stopwatch.GetTimestamp();
     }
 }
