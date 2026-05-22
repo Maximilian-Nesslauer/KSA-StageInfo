@@ -27,9 +27,17 @@ internal static class StageInfoPanel
     private static readonly ImColor8 ColorRcsLow = new ImColor8(230, 90, 60, 255);
     private const float RcsBarLowFraction = 0.2f;
 
-    private static MethodInvoker? _drawThruster;
-    private static MethodInvoker? _drawEngine;
-    private static MethodInvoker? _drawDecoupler;
+    // Closed-generic invokers for StagingWindow.DrawComponent<T>. Order
+    // mirrors stock's per-part call order (Thruster, Engine, Decoupler).
+    private static readonly Type[] DrawComponentTypes =
+    {
+        typeof(ThrusterController),
+        typeof(EngineController),
+        typeof(Decoupler),
+    };
+
+    private static readonly MethodInvoker?[] _drawComponentInvokers =
+        new MethodInvoker?[DrawComponentTypes.Length];
 
     // Enum.GetValues<T>() allocates; cache it.
     private static readonly StageDisplayMode[] AllModes =
@@ -53,9 +61,9 @@ internal static class StageInfoPanel
     public static void ApplyPatches(Harmony harmony)
     {
         MethodInfo openComponent = GameReflection.StagingWindow_DrawComponentOpen!;
-        _drawThruster = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(ThrusterController)));
-        _drawEngine   = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(EngineController)));
-        _drawDecoupler = MethodInvoker.Create(openComponent.MakeGenericMethod(typeof(Decoupler)));
+        for (int i = 0; i < DrawComponentTypes.Length; i++)
+            _drawComponentInvokers[i] = MethodInvoker.Create(
+                openComponent.MakeGenericMethod(DrawComponentTypes[i]));
 
         harmony.Patch(GameReflection.StagingWindow_DrawContent!,
             prefix: new HarmonyMethod(typeof(StageInfoPanel), nameof(DrawContentPrefix)));
@@ -66,11 +74,9 @@ internal static class StageInfoPanel
 
     public static void Reset()
     {
-        // MethodInvokers are reassigned on next ApplyPatches; null them so a
+        // Invokers are reassigned on next ApplyPatches; clear them so a
         // partial reload can't reuse a stale binding.
-        _drawThruster = null;
-        _drawEngine = null;
-        _drawDecoupler = null;
+        Array.Clear(_drawComponentInvokers);
     }
 
     #region DrawContent
@@ -143,11 +149,6 @@ internal static class StageInfoPanel
             parts[i].HighlightedForSequence = false;
             parts[i].HighlightedForStage = false;
         }
-    }
-
-    private static void InvokeDrawComponent(MethodInvoker? invoker, object instance, Part part)
-    {
-        invoker?.Invoke(instance, part);
     }
 
     #endregion
@@ -405,9 +406,8 @@ internal static class StageInfoPanel
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                InvokeDrawComponent(_drawThruster, instance, part);
-                InvokeDrawComponent(_drawEngine, instance, part);
-                InvokeDrawComponent(_drawDecoupler, instance, part);
+                foreach (MethodInvoker? invoker in _drawComponentInvokers)
+                    invoker?.Invoke(instance, part);
                 ImGui.TreePop();
             }
         }
