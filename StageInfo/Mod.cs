@@ -44,6 +44,12 @@ public sealed class Mod
         bool panelOk = GameReflection.ValidatePanelTargets();
         bool burnOk = GameReflection.ValidateBurnTarget();
 
+        // Always on: drives the analysis cache for the controlled vehicle.
+        // The main-thread BurnDuration write inside is gated on the worker
+        // patch having been registered below (else it would flicker against
+        // the stock recompute).
+        _harmony.CreateClassProcessor(typeof(Patch_CorrectedBurnDuration)).Patch();
+
         if (panelOk)
         {
             StageInfoPanel.ApplyPatches(_harmony);
@@ -53,10 +59,6 @@ public sealed class Mod
             DefaultCategory.Log.Warning(
                 "[StageInfo] Panel disabled, StagingWindow targets not found.");
         }
-
-        // Drives the cache for the controlled vehicle; writes corrected BurnDuration
-        // only if the worker patch below is active (else it would flicker).
-        _harmony.CreateClassProcessor(typeof(Patch_CorrectedBurnDuration)).Patch();
 
         if (burnOk)
         {
