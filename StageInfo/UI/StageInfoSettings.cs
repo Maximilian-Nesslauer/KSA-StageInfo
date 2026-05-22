@@ -27,6 +27,10 @@ internal static class StageInfoSettings
     private static readonly List<Astronomical> _bodiesCache = new();
     private static CelestialSystem? _bodiesCacheSystem;
 
+    private static IParentBody? _resolvedBody;
+    private static CelestialSystem? _resolvedBodySystem;
+    private static string? _resolvedBodyKey;
+
     public static AnalysisEnvironment ResolveEnvironment(Vehicle vehicle)
     {
         float currentPressure = vehicle.KinematicStates.AtmosphericPressure;
@@ -113,6 +117,9 @@ internal static class StageInfoSettings
         SelectedBodyId = null;
         _bodiesCache.Clear();
         _bodiesCacheSystem = null;
+        _resolvedBody = null;
+        _resolvedBodySystem = null;
+        _resolvedBodyKey = null;
     }
 
     private static AnalysisEnvironment ResolvePlanningEnvironment(Vehicle vehicle)
@@ -155,19 +162,34 @@ internal static class StageInfoSettings
             IsPrimaryCurrentCondition: false);
     }
 
+    // Caches the last lookup keyed on (system, SelectedBodyId). Called every
+    // analyzer tick while a burn is active in Planning mode, so the cache
+    // saves a full Universe.CurrentSystem.All scan per frame.
     private static IParentBody? FindSelectedBody()
     {
-        if (SelectedBodyId == null || Universe.CurrentSystem == null)
+        CelestialSystem? system = Universe.CurrentSystem;
+        if (SelectedBodyId == null || system == null)
             return null;
 
-        foreach (Astronomical astro in Universe.CurrentSystem.All.AsSpan())
+        if (ReferenceEquals(system, _resolvedBodySystem)
+            && SelectedBodyId == _resolvedBodyKey)
+            return _resolvedBody;
+
+        _resolvedBodySystem = system;
+        _resolvedBodyKey = SelectedBodyId;
+        _resolvedBody = null;
+
+        foreach (Astronomical astro in system.All.AsSpan())
         {
             if (astro is Vehicle)
                 continue;
             if (astro is IParentBody body && astro.Id == SelectedBodyId)
-                return body;
+            {
+                _resolvedBody = body;
+                break;
+            }
         }
 
-        return null;
+        return _resolvedBody;
     }
 }
