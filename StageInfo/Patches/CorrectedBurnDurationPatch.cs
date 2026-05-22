@@ -23,23 +23,10 @@ internal static class CorrectedBurnState
 
     internal static volatile float CorrectedDuration;
 
-    // Set once at load, cleared at unload; not read from worker thread.
-    // False when the worker patch didn't apply; main-thread writes to fc.Burn
-    // are then suppressed to avoid flicker from the stock recompute.
-    internal static bool WorkerFixEnabled;
-
-    /// <summary>Resets only the per-burn state; WorkerFixEnabled persists.</summary>
     internal static void ClearBurn()
     {
         TrackedBurn = null;
         CorrectedDuration = 0f;
-    }
-
-    /// <summary>Full reset for mod unload.</summary>
-    internal static void ResetForUnload()
-    {
-        ClearBurn();
-        WorkerFixEnabled = false;
     }
 }
 
@@ -75,9 +62,11 @@ internal static class Patch_CorrectedBurnDuration
             return;
         }
 
-        // Without the worker patch, the next tick's stock UpdateBurnTarget
-        // recomputes BurnDuration and we'd flicker - suppress the write.
-        if (CorrectedBurnState.WorkerFixEnabled)
+        // Without the worker patch we skip the entire write: the next tick's
+        // stock UpdateBurnTarget would recompute BurnDuration and we'd flicker.
+        // Mod.OnFullyLoaded registers the worker patch iff this reflection
+        // target resolved, so the null check stands in for "patch registered".
+        if (GameReflection.FlightComputer_UpdateBurnTarget != null)
         {
             CorrectedBurnState.CorrectedDuration = corrected.Value;
             CorrectedBurnState.TrackedBurn = fc.Burn;

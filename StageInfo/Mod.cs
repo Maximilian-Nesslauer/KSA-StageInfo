@@ -63,11 +63,9 @@ public sealed class Mod
             _harmony.Patch(GameReflection.FlightComputer_UpdateBurnTarget!,
                 postfix: new HarmonyMethod(typeof(Patch_WorkerIgnitionTiming),
                     nameof(Patch_WorkerIgnitionTiming.Postfix)));
-            CorrectedBurnState.WorkerFixEnabled = true;
         }
         else
         {
-            CorrectedBurnState.WorkerFixEnabled = false;
             DefaultCategory.Log.Warning(
                 "[StageInfo] FlightComputer.UpdateBurnTarget not found, burn duration correction disabled " +
                 "(cache still drives the panel, but fc.Burn is not modified).");
@@ -93,7 +91,7 @@ public sealed class Mod
         DebugLoggingPatches.Reset();
         AnalysisCache.Reset();
         StageInfoSettings.Reset();
-        CorrectedBurnState.ResetForUnload();
+        CorrectedBurnState.ClearBurn();
         SequenceAnalyzer.ResetPools();
         StageFuelAnalyzer.ResetPools();
         RcsAnalyzer.ResetPools();
