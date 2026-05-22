@@ -11,6 +11,4 @@ internal static class DebugConfig
     public static bool StageInfo = false;
     public static bool Performance = false;
 #endif
-
-    public static bool Any => StageInfo || Performance;
 }
