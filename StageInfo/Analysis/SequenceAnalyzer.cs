@@ -71,19 +71,14 @@ internal static class SequenceAnalyzer
     private static readonly List<SequenceBurnInfo> _pooledSequences = new();
     private static readonly HashSet<uint> _pooledJettisonedPartIds = new();
     private static readonly HashSet<ulong> _pooledFuelClaimedTankIds = new();
-    private static readonly List<Sequence> _pooledSortedSequences = new();
     private static readonly List<EngineController> _pooledEngines = new();
     private static readonly List<BurnSequenceAllocation> _pooledAllocations = new();
-
-    private static readonly Comparison<Sequence> SequenceAscending =
-        static (a, b) => a.Number.CompareTo(b.Number);
 
     public static void ResetPools()
     {
         _pooledSequences.Clear();
         _pooledJettisonedPartIds.Clear();
         _pooledFuelClaimedTankIds.Clear();
-        _pooledSortedSequences.Clear();
         _pooledEngines.Clear();
         _pooledAllocations.Clear();
     }
@@ -123,13 +118,26 @@ internal static class SequenceAnalyzer
                 $"ambientPressure={ambientPressure:F0} Pa");
         }
 
-        // SequenceList.ResetCaches already sorts by Number, but we sort our own
-        // copy defensively so a future game change can't shuffle our walk order.
-        SortSequencesAscending(sequences);
-
-        for (int si = 0; si < _pooledSortedSequences.Count; si++)
+        // SequenceList.ResetCaches re-sorts by Number after every mutation
+        // that may reorder, so we iterate the span directly. The dV/mass
+        // propagation across stages depends on ascending Number order; the
+        // DEBUG check below catches a silent regression if the invariant
+        // ever stops holding.
+#if DEBUG
+        for (int i = 1; i < sequences.Length; i++)
         {
-            Sequence sequence = _pooledSortedSequences[si];
+            if (sequences[i].Number < sequences[i - 1].Number)
+            {
+                DefaultCategory.Log.Warning(
+                    "[StageInfo] SequenceList not sorted ascending by Number; " +
+                    "game invariant changed, analyzer dV is unreliable.");
+                break;
+            }
+        }
+#endif
+        for (int si = 0; si < sequences.Length; si++)
+        {
+            Sequence sequence = sequences[si];
 
             if (sequence.Parts.IsEmpty)
                 continue;
@@ -273,14 +281,6 @@ internal static class SequenceAnalyzer
             PerfTracker.Record("SequenceAnalyzer.Analyze", Stopwatch.GetTimestamp() - perfStart);
 #endif
         return result;
-    }
-
-    private static void SortSequencesAscending(ReadOnlySpan<Sequence> sequences)
-    {
-        _pooledSortedSequences.Clear();
-        for (int i = 0; i < sequences.Length; i++)
-            _pooledSortedSequences.Add(sequences[i]);
-        _pooledSortedSequences.Sort(SequenceAscending);
     }
 
     private static void CollectEngines(Sequence sequence,
