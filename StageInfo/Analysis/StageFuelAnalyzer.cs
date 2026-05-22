@@ -70,12 +70,12 @@ internal static class StageFuelAnalyzer
             int stageNum = part.Stage;
             if (!_stageIndex.TryGetValue(stageNum, out int idx))
             {
-
                 if (!_warnedMissingStage)
                 {
                     _warnedMissingStage = true;
                     DefaultCategory.Log.Warning(
-                        $"[StageInfo] StageFuelAnalyzer: part.Stage={stageNum} not in " +
+                        $"[StageInfo] StageFuelAnalyzer: part '{part.DisplayName}' " +
+                        $"(id={part.InstanceId}) has Stage={stageNum} not in " +
                         "StageList.Stages, recovering. (logged once per session)");
                 }
                 idx = _pooledStages.Count;
