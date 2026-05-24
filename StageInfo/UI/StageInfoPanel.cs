@@ -27,6 +27,13 @@ internal static class StageInfoPanel
     private static readonly ImColor8 ColorRcsLow = new ImColor8(230, 90, 60, 255);
     private const float RcsBarLowFraction = 0.2f;
 
+    // Stock default is (400, 300), which truncates the per-sequence info line
+    // and barely fits two stages. The width is overridden at runtime to match
+    // the BurnControl gauge when found; height stays at this default.
+    private static readonly float2 DefaultInitialWindowSize = new float2(700f, 700f);
+
+    private static bool _runtimeApplied;
+
     // Closed-generic invokers for StagingWindow.DrawComponent<T>. Order
     // mirrors stock's per-part call order (Thruster, Engine, Decoupler).
     private static readonly Type[] DrawComponentTypes =
@@ -77,6 +84,49 @@ internal static class StageInfoPanel
         // Invokers are reassigned on next ApplyPatches; clear them so a
         // partial reload can't reuse a stale binding.
         Array.Clear(_drawComponentInvokers);
+
+        // Re-arm so a reload runs ApplyInitialWindowSize again. The window's
+        // ImGui size state itself can't be reverted from outside Begin/End,
+        // and stock's SetNextWindowSize(_initialSize, Once) is already spent
+        // for this ImGui session, so there is nothing further to restore.
+        _runtimeApplied = false;
+    }
+
+    // First-frame setup: pick a width that matches the BurnControl gauge,
+    // compute the stock anchor-from-right position so the wider window stays
+    // inside the viewport, and apply both via ImGui.SetWindowSize/SetWindowPos
+    // with ImGuiCond.Always. Runs inside the Begin/End scope of OnDrawUi so
+    // the resize takes effect on the current frame's layout.
+    private static void ApplyInitialWindowSize()
+    {
+        float targetWidth = DefaultInitialWindowSize.X;
+        foreach (GaugeCanvas canvas in GaugeCanvas.AllCanvases)
+        {
+            if (canvas.Id == "BurnControl")
+            {
+                float w = canvas.GetPixelsSize().X;
+                if (w > 0f)
+                    targetWidth = w;
+                break;
+            }
+        }
+
+        float2 newSize = new float2(targetWidth, DefaultInitialWindowSize.Y);
+
+        // Mirror StagingWindow's constructor formula: anchor to viewport's
+        // top-right with a line-height inset.
+        ImGuiViewportPtr viewport = ImGui.GetMainViewport();
+        float lineHeight = ImGui.GetTextLineHeightWithSpacing();
+        float2 newPos = new float2(
+            (viewport.Pos + viewport.Size).X - newSize.X - lineHeight,
+            viewport.Pos.Y + lineHeight * 2f);
+
+        ImGui.SetWindowSize(in newSize, ImGuiCond.Always);
+        ImGui.SetWindowPos(newPos, ImGuiCond.Always);
+
+        if (DebugConfig.StageInfo)
+            DefaultCategory.Log.Debug(
+                $"[StageInfo] Applied window size {newSize.X} x {newSize.Y} at ({newPos.X}, {newPos.Y}).");
     }
 
     #region DrawContent
@@ -89,6 +139,12 @@ internal static class StageInfoPanel
         Vehicle? vehicle = Program.ControlledVehicle;
         if (vehicle == null)
             return false;
+
+        if (!_runtimeApplied)
+        {
+            _runtimeApplied = true;
+            ApplyInitialWindowSize();
+        }
 
         AnalysisCache.MarkPanelActive();
 
@@ -470,18 +526,18 @@ internal static class StageInfoPanel
         else
         {
             string body = string.Format(Inv, "Delta V: {0:N0} m/s", info.DeltaV);
-            DrawInfoSegment(WithLabel(label, body), ref lineX, availWidth, spacing, isFirst: true);
+            DrawInfoSegment(WithLabel(label, body), ref lineX, availWidth, spacing);
         }
 
         DrawInfoSegment(string.Format(Inv, "TWR: {0:F2}", info.Twr),
-            ref lineX, availWidth, spacing, isFirst: false);
+            ref lineX, availWidth, spacing);
 
         float displayBurnTime = alloc?.AllocatedBurnTime ?? info.BurnTime;
         DrawInfoSegment(string.Format(Inv, "Burn: {0}", FormatBurnTime(displayBurnTime)),
-            ref lineX, availWidth, spacing, isFirst: false);
+            ref lineX, availWidth, spacing);
 
         DrawInfoSegment(string.Format(Inv, "ISP: {0:F0}s", info.Isp),
-            ref lineX, availWidth, spacing, isFirst: false);
+            ref lineX, availWidth, spacing);
 
         ImGui.PopStyleColor();
         ImGui.Unindent();
@@ -500,33 +556,33 @@ internal static class StageInfoPanel
         float lineX = 0f;
 
         DrawInfoSegment(string.Format(Inv, "Mass: {0:N0} kg", v.DryMass + v.CurrentFuelMass),
-            ref lineX, availWidth, spacing, isFirst: true);
+            ref lineX, availWidth, spacing);
 
         if (v.MaxFuelMass > 0f)
             DrawInfoSegment(string.Format(Inv, "Fuel: {0:N0}/{1:N0} kg", v.CurrentFuelMass, v.MaxFuelMass),
-                ref lineX, availWidth, spacing, isFirst: false);
+                ref lineX, availWidth, spacing);
 
         if (AnalysisCache.TryGetStageRcsInfo(stageNumber, out var rcs)
             && rcs.Substances != null && rcs.Substances.Count > 0)
         {
-            DrawInfoSegment("RCS:", ref lineX, availWidth, spacing, isFirst: false);
+            DrawInfoSegment("RCS:", ref lineX, availWidth, spacing);
             for (int i = 0; i < rcs.Substances.Count; i++)
             {
                 RcsSubstanceInfo s = rcs.Substances[i];
                 string segText = string.Format(Inv, "{0} {1:N0}/{2:N0} kg",
                     s.ShortName, s.CurrentMass, s.MaxMass);
-                DrawInfoSegment(segText, ref lineX, availWidth, spacing, isFirst: false);
+                DrawInfoSegment(segText, ref lineX, availWidth, spacing);
                 DrawSubstanceTooltip(s);
             }
         }
 
         if (v.EngineCount > 0)
             DrawInfoSegment(string.Format(Inv, "Engines: {0}", v.EngineCount),
-                ref lineX, availWidth, spacing, isFirst: false);
+                ref lineX, availWidth, spacing);
 
         if (v.DecouplerCount > 0)
             DrawInfoSegment(string.Format(Inv, "Decouplers: {0}", v.DecouplerCount),
-                ref lineX, availWidth, spacing, isFirst: false);
+                ref lineX, availWidth, spacing);
 
         ImGui.Unindent();
     }
@@ -634,34 +690,39 @@ internal static class StageInfoPanel
             PushDimmedTextColor(extraDim: true);
 
         string prefix = string.IsNullOrEmpty(label) ? "" : label + " ";
+        float spacing = ImGui.GetStyle().ItemSpacing.X;
+        float availWidth = ImGui.GetContentRegionAvail().X;
+        float lineX = 0f;
 
         if (burnAnalysis != null)
         {
             var burn = burnAnalysis.Value;
-            ImGui.Text(string.Format(Inv,
-                "{0}Total Delta V: {1:N0} m/s", prefix, sequences.TotalDeltaV));
-            ImGui.SameLine();
-            ImGui.Text("|");
-            ImGui.SameLine();
+            DrawInfoSegment(string.Format(Inv, "{0}Total Delta V: {1:N0} m/s",
+                prefix, sequences.TotalDeltaV),
+                ref lineX, availWidth, spacing);
+
+            DrawInfoSegment("|", ref lineX, availWidth, spacing);
 
             if (burn.IsSufficient)
             {
-                ImGui.Text(string.Format(Inv,
+                DrawInfoSegment(string.Format(Inv,
                     "Burn: {0:N0} m/s  Burn Time: {1}",
-                    burn.RequiredDv, FormatBurnTime(burn.TotalBurnTime)));
+                    burn.RequiredDv, FormatBurnTime(burn.TotalBurnTime)),
+                    ref lineX, availWidth, spacing);
             }
             else
             {
-                ImGui.PushStyleColor(ImGuiCol.Text, ColorInsufficient);
-                ImGui.Text(string.Format(Inv, "Burn: {0:N0} m/s  INSUFFICIENT", burn.RequiredDv));
-                ImGui.PopStyleColor();
+                DrawInfoSegmentColored(string.Format(Inv,
+                    "Burn: {0:N0} m/s  INSUFFICIENT", burn.RequiredDv),
+                    ColorInsufficient, ref lineX, availWidth, spacing);
             }
         }
         else
         {
-            ImGui.Text(string.Format(Inv,
+            DrawInfoSegment(string.Format(Inv,
                 "{0}Total Delta V: {1:N0} m/s  Burn Time: {2}",
-                prefix, sequences.TotalDeltaV, FormatBurnTime(sequences.TotalBurnTime)));
+                prefix, sequences.TotalDeltaV, FormatBurnTime(sequences.TotalBurnTime)),
+                ref lineX, availWidth, spacing);
         }
 
         if (isDimmed)
@@ -707,28 +768,41 @@ internal static class StageInfoPanel
         => string.IsNullOrEmpty(label) ? body : label + " " + body;
 
     private static void DrawInfoSegment(string text, ref float lineX,
-        float availWidth, float spacing, bool isFirst)
+        float availWidth, float spacing)
     {
-        DrawInfoSegmentColored(text, null, ref lineX, availWidth, spacing, isFirst);
+        DrawInfoSegmentColored(text, null, ref lineX, availWidth, spacing);
     }
 
     private static void DrawInfoSegmentColored(string text, ImColor8? color,
-        ref float lineX, float availWidth, float spacing, bool isFirst = false)
+        ref float lineX, float availWidth, float spacing)
     {
         float2 textSize = ImGui.CalcTextSize(text);
+        bool needsWrap = textSize.X > availWidth;
 
-        if (lineX > 0f && lineX + textSize.X <= availWidth)
+        if (lineX > 0f && !needsWrap && lineX + textSize.X <= availWidth)
             ImGui.SameLine(0f, spacing * 2f);
         else if (lineX > 0f)
             lineX = 0f;
 
         if (color != null)
             ImGui.PushStyleColor(ImGuiCol.Text, color.Value);
-        ImGui.Text(text);
+
+        if (needsWrap)
+        {
+            // TextWrapped already pushes/pops wrap pos at 0 (content region's
+            // right edge). After it, we don't know the cursor's exact X, so
+            // force the next segment to start on its own line.
+            ImGui.TextWrapped(text);
+            lineX = availWidth + 1f;
+        }
+        else
+        {
+            ImGui.Text(text);
+            lineX += textSize.X + spacing * 2f;
+        }
+
         if (color != null)
             ImGui.PopStyleColor();
-
-        lineX += textSize.X + spacing * 2f;
     }
 
     private static string FormatBurnTime(float seconds)
