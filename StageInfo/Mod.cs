@@ -73,6 +73,17 @@ public sealed class Mod
                 "(cache still drives the panel, but fc.Burn is not modified).");
         }
 
+        bool editorOk = GameReflection.ValidateEditorTargets();
+        if (editorOk)
+        {
+            EditorStageInfoPanel.ApplyPatches(_harmony);
+        }
+        else
+        {
+            DefaultCategory.Log.Warning(
+                "[StageInfo] Editor panel disabled, VehicleEditingSpace targets not found.");
+        }
+
 #if DEBUG
         // Verbose analyzer logging duplicates AnalysisCache work for the same
         // tick; gated behind DEBUG so Release never pays for the redundancy.
@@ -90,9 +101,12 @@ public sealed class Mod
         _harmony = null;
 
         StageInfoPanel.Reset();
+        EditorStageInfoPanel.Reset();
         DebugLoggingPatches.Reset();
         AnalysisCache.Reset();
+        EditorAnalysisCache.Reset();
         StageInfoSettings.Reset();
+        EditorStageInfoSettings.Reset();
         CorrectedBurnState.ClearBurn();
         SequenceAnalyzer.ResetPools();
         StageFuelAnalyzer.ResetPools();

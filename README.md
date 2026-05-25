@@ -7,14 +7,21 @@ and augments each row: Sequences get Delta V / TWR / burn time / ISP,
 Stages get fuel pool / mass / engine count / decoupler count. Also adds
 a totals footer and a multi-stage-aware burn duration for auto-burns.
 
+In the vehicle editor (Shift+E), a standalone StageInfo panel shows
+the same analysis for the rocket you are currently building, with a
+body selector for TWR reference and a Vacuum/ASL toggle for bodies
+with atmosphere.
+
 <table>
   <tr>
     <th align="center">Stock</th>
     <th align="center">With StageInfo</th>
+    <th align="center">Editor Panel</th>
   </tr>
   <tr valign="top">
-    <td><img src="images/stock.png" alt="Stock staging window" width="420" /></td>
-    <td><img src="images/stageinfo.png" alt="Staging window with StageInfo" width="420" /></td>
+    <td><img src="images/stock.png" alt="Stock staging window" width="350" /></td>
+    <td><img src="images/stageinfo.png" alt="Staging window with StageInfo" width="350" /></td>
+    <td><img src="images/EditorStageInfoPanel.png" alt="StageInfo panel in the vehicle editor" width="350" /></td>
   </tr>
 </table>
 
@@ -41,6 +48,10 @@ Validated against KSA build version 2026.5.11.4462.
 - **Display modes** Auto / VAC / ASL / VAC+ASL / Planning for previewing
   dV under different ambient conditions (Planning lets you pick any
   celestial body in the current system).
+- **Editor panel** in the vehicle editor (Shift+E) with per-sequence
+  dV/TWR/burn/ISP, fuel and RCS bars, body selector for TWR reference,
+  and a Vacuum/ASL toggle for bodies with atmosphere. Toggle via the
+  "StageInfo" menu tab in the editor menu bar.
 - **Totals footer** with total Delta V, planned burn dV, and burn time.
   Turns red when the planned burn exceeds available dV.
 - **Corrected burn duration** for multi-stage burns: the stock game

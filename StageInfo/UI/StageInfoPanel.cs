@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.Reflection;
 using MethodInvoker = System.Reflection.MethodInvoker;
 using Brutal.ImGuiApi;
@@ -11,6 +10,7 @@ using HarmonyLib;
 using KSA;
 using StageInfo.Analysis;
 using StageInfo.Core;
+using static StageInfo.UI.StageInfoUiHelpers;
 
 namespace StageInfo.UI;
 
@@ -20,8 +20,6 @@ namespace StageInfo.UI;
 /// </summary>
 internal static class StageInfoPanel
 {
-    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-
     private static readonly ImColor8 ColorInsufficient = new ImColor8(255, 60, 60, 255);
     private static readonly ImColor8 ColorRcsBar = new ImColor8(70, 150, 230, 255);
     private static readonly ImColor8 ColorRcsLow = new ImColor8(230, 90, 60, 255);
@@ -568,6 +566,8 @@ internal static class StageInfoPanel
             DrawInfoSegment("RCS:", ref lineX, availWidth, spacing);
             for (int i = 0; i < rcs.Substances.Count; i++)
             {
+                if (i > 0)
+                    DrawInfoSegment("|", ref lineX, availWidth, spacing);
                 RcsSubstanceInfo s = rcs.Substances[i];
                 string segText = string.Format(Inv, "{0} {1:N0}/{2:N0} kg",
                     s.ShortName, s.CurrentMass, s.MaxMass);
@@ -731,94 +731,10 @@ internal static class StageInfoPanel
 
     #endregion
 
-    #region Shared helpers
-
-    private static void DrawFuelProgressBar(float fuelFraction)
-    {
-        ImGui.SameLine();
-        float availWidth = ImGui.GetContentRegionAvail().X;
-        float pctTextWidth = ImGui.CalcTextSize("100% fuel"u8).X + 8f;
-        float barWidth = availWidth - pctTextWidth;
-        if (barWidth < 30f) return;
-
-        float lineHeight = ImGui.GetTextLineHeight();
-        float barHeight = lineHeight * 0.6f;
-        float yOffset = (lineHeight - barHeight) * 0.5f;
-
-        float2 cursor = ImGui.GetCursorPos();
-        ImGui.SetCursorPos(new float2(cursor.X, cursor.Y + yOffset));
-        ImGui.ProgressBar(fuelFraction, new float2?(new float2(barWidth, barHeight)), ""u8);
-        ImGui.SameLine();
-        ImGui.SetCursorPosY(cursor.Y);
-        ImGui.Text(string.Format(Inv, "{0}% fuel", (int)MathF.Round(fuelFraction * 100f)));
-    }
-
-    /// <summary>
-    /// Pushes TextDisabled as text color; if extraDim, halves the alpha
-    /// further. Caller pops with ImGui.PopStyleColor().
-    /// </summary>
-    private static void PushDimmedTextColor(bool extraDim)
-    {
-        var color = ImGui.GetStyleColorVec4(ImGuiCol.TextDisabled);
-        if (extraDim) color.W *= 0.6f;
-        ImGui.PushStyleColor(ImGuiCol.Text, color);
-    }
+    #region Helpers
 
     private static string WithLabel(string? label, string body)
         => string.IsNullOrEmpty(label) ? body : label + " " + body;
-
-    private static void DrawInfoSegment(string text, ref float lineX,
-        float availWidth, float spacing)
-    {
-        DrawInfoSegmentColored(text, null, ref lineX, availWidth, spacing);
-    }
-
-    private static void DrawInfoSegmentColored(string text, ImColor8? color,
-        ref float lineX, float availWidth, float spacing)
-    {
-        float2 textSize = ImGui.CalcTextSize(text);
-        bool needsWrap = textSize.X > availWidth;
-
-        if (lineX > 0f && !needsWrap && lineX + textSize.X <= availWidth)
-            ImGui.SameLine(0f, spacing * 2f);
-        else if (lineX > 0f)
-            lineX = 0f;
-
-        if (color != null)
-            ImGui.PushStyleColor(ImGuiCol.Text, color.Value);
-
-        if (needsWrap)
-        {
-            // TextWrapped already pushes/pops wrap pos at 0 (content region's
-            // right edge). After it, we don't know the cursor's exact X, so
-            // force the next segment to start on its own line.
-            ImGui.TextWrapped(text);
-            lineX = availWidth + 1f;
-        }
-        else
-        {
-            ImGui.Text(text);
-            lineX += textSize.X + spacing * 2f;
-        }
-
-        if (color != null)
-            ImGui.PopStyleColor();
-    }
-
-    private static string FormatBurnTime(float seconds)
-    {
-        if (seconds < 60f)
-            return $"{seconds:F0}s";
-        if (seconds < 3600f)
-        {
-            int m = (int)(seconds / 60f);
-            int s = (int)(seconds % 60f);
-            return s > 0 ? $"{m}m {s}s" : $"{m}m";
-        }
-        int h = (int)(seconds / 3600f);
-        int min = (int)((seconds % 3600f) / 60f);
-        return min > 0 ? $"{h}h {min}m" : $"{h}h";
-    }
 
     #endregion
 }

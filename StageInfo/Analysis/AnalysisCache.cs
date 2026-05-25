@@ -23,9 +23,14 @@ internal sealed class AnalysisSlot
 
     public void RunSequenceAnalysis(Vehicle vehicle, float ambientPressure, float? surfaceGravity)
     {
-        var result = SequenceAnalyzer.Analyze(vehicle,
-            ambientPressure: ambientPressure,
-            surfaceGravityOverride: surfaceGravity);
+        float sg = surfaceGravity ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
+        RunSequenceAnalysis(vehicle.Parts, vehicle.TotalMass, ambientPressure, sg);
+    }
+
+    public void RunSequenceAnalysis(PartTree parts, float totalMass, float ambientPressure, float surfaceGravity)
+    {
+        var result = SequenceAnalyzer.Analyze(parts, totalMass,
+            ambientPressure, surfaceGravity);
 
         SequenceList.Clear();
         SequenceList.AddRange(result.Sequences);

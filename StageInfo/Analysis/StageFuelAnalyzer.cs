@@ -45,6 +45,9 @@ internal static class StageFuelAnalyzer
     }
 
     public static VehicleFuelAnalysis Analyze(Vehicle vehicle)
+        => Analyze(vehicle.Parts);
+
+    public static VehicleFuelAnalysis Analyze(PartTree parts)
     {
 #if DEBUG
         long perfStart = DebugConfig.Performance ? Stopwatch.GetTimestamp() : 0;
@@ -52,8 +55,7 @@ internal static class StageFuelAnalyzer
         _pooledStages.Clear();
         _stageIndex.Clear();
 
-        // Seed one row per declared stage so empty ones still render.
-        ReadOnlySpan<Stage> stages = vehicle.Parts.StageList.Stages;
+        ReadOnlySpan<Stage> stages = parts.StageList.Stages;
         for (int i = 0; i < stages.Length; i++)
         {
             int num = stages[i].Number;
@@ -61,12 +63,12 @@ internal static class StageFuelAnalyzer
             _pooledStages.Add(new StageFuelInfo { StageNumber = num });
         }
 
-        ReadOnlySpan<Part> parts = vehicle.Parts.Parts;
-        ReadOnlySpan<MoleState> moleStates = vehicle.Parts.Moles.States;
+        ReadOnlySpan<Part> allParts = parts.Parts;
+        ReadOnlySpan<MoleState> moleStates = parts.Moles.States;
 
-        for (int i = 0; i < parts.Length; i++)
+        for (int i = 0; i < allParts.Length; i++)
         {
-            Part part = parts[i];
+            Part part = allParts[i];
             int stageNum = part.Stage;
             if (!_stageIndex.TryGetValue(stageNum, out int idx))
             {
@@ -86,13 +88,10 @@ internal static class StageFuelAnalyzer
             StageFuelInfo info = _pooledStages[idx];
             info.DryMass += MassHelpers.SumInertMassWithSubParts(part);
 
-            Span<Tank> tanks = part.Modules.Get<Tank>();
-            for (int t = 0; t < tanks.Length; t++)
-            {
-                Tank tank = tanks[t];
-                info.CurrentFuelMass += tank.ComputeSubstanceMass(moleStates);
-                info.MaxFuelMass += MassHelpers.ComputeTankMaxMass(tank);
-            }
+            AccumulateTanks(part.Modules, moleStates, ref info);
+            ReadOnlySpan<Part> subParts = part.SubParts;
+            for (int sp = 0; sp < subParts.Length; sp++)
+                AccumulateTanks(subParts[sp].Modules, moleStates, ref info);
 
             if (part.Modules.HasAny<EngineController>()) info.EngineCount++;
             if (part.Modules.HasAny<Decoupler>()) info.DecouplerCount++;
@@ -114,5 +113,17 @@ internal static class StageFuelAnalyzer
             PerfTracker.Record("StageFuelAnalyzer.Analyze", Stopwatch.GetTimestamp() - perfStart);
 #endif
         return new VehicleFuelAnalysis { Stages = _pooledStages };
+    }
+
+    private static void AccumulateTanks(ModuleList modules,
+        ReadOnlySpan<MoleState> moleStates, ref StageFuelInfo info)
+    {
+        Span<Tank> tanks = modules.Get<Tank>();
+        for (int t = 0; t < tanks.Length; t++)
+        {
+            Tank tank = tanks[t];
+            info.CurrentFuelMass += tank.ComputeSubstanceMass(moleStates);
+            info.MaxFuelMass += MassHelpers.ComputeTankMaxMass(tank);
+        }
     }
 }

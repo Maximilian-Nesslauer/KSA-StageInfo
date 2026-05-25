@@ -88,6 +88,14 @@ internal static class SequenceAnalyzer
     public static VehicleBurnAnalysis Analyze(Vehicle vehicle,
         float ambientPressure = 0f, float? surfaceGravityOverride = null, bool log = false)
     {
+        float surfaceGravity = surfaceGravityOverride
+            ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
+        return Analyze(vehicle.Parts, vehicle.TotalMass, ambientPressure, surfaceGravity, log);
+    }
+
+    public static VehicleBurnAnalysis Analyze(PartTree parts, float totalMass,
+        float ambientPressure, float surfaceGravity, bool log = false)
+    {
 #if DEBUG
         long perfStart = DebugConfig.Performance ? Stopwatch.GetTimestamp() : 0;
 #endif
@@ -102,18 +110,14 @@ internal static class SequenceAnalyzer
             TotalBurnTime = 0f
         };
 
-        ReadOnlySpan<Sequence> sequences = vehicle.Parts.SequenceList.Sequences;
-        ReadOnlySpan<MoleState> moleStates = vehicle.Parts.Moles.States;
-        float currentMass = vehicle.TotalMass;
-
-        float surfaceGravity = surfaceGravityOverride
-            ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
+        ReadOnlySpan<Sequence> sequences = parts.SequenceList.Sequences;
+        ReadOnlySpan<MoleState> moleStates = parts.Moles.States;
+        float currentMass = totalMass;
 
         if (log)
         {
             DefaultCategory.Log.Debug(
-                $"[StageInfo] SequenceAnalyzer: vehicle={vehicle.Id}, totalMass={currentMass:F1} kg, " +
-                $"inertMass={vehicle.InertMass:F1} kg, propellant={vehicle.PropellantMass:F1} kg, " +
+                $"[StageInfo] SequenceAnalyzer: totalMass={currentMass:F1} kg, " +
                 $"sequences={sequences.Length}, surfaceG={surfaceGravity:F3} m/s^2, " +
                 $"ambientPressure={ambientPressure:F0} Pa");
         }

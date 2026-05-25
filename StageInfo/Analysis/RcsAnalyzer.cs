@@ -105,6 +105,9 @@ internal static class RcsAnalyzer
     #endregion
 
     public static VehicleRcsAnalysis Analyze(Vehicle vehicle, float ambientPressure)
+        => Analyze(vehicle.Parts, vehicle.TotalMass, ambientPressure);
+
+    public static VehicleRcsAnalysis Analyze(PartTree parts, float totalMass, float ambientPressure)
     {
 #if DEBUG
         long perfStart = DebugConfig.Performance ? Stopwatch.GetTimestamp() : 0;
@@ -122,10 +125,9 @@ internal static class RcsAnalyzer
             Stages = _pooledStages
         };
 
-        Span<EngineController> engines = vehicle.Parts.Modules.Get<EngineController>();
-        Span<ThrusterController> thrusters = vehicle.Parts.Modules.Get<ThrusterController>();
+        Span<EngineController> engines = parts.Modules.Get<EngineController>();
+        Span<ThrusterController> thrusters = parts.Modules.Get<ThrusterController>();
 
-        // IsActive filter mirrors FlightComputer.ReadUpdatedVehicleConfiguration.
         for (int i = 0; i < engines.Length; i++)
         {
             EngineController engine = engines[i];
@@ -141,7 +143,7 @@ internal static class RcsAnalyzer
 
         if (hasActiveThruster)
         {
-            ReadOnlySpan<MoleState> moleStates = vehicle.Parts.Moles.States;
+            ReadOnlySpan<MoleState> moleStates = parts.Moles.States;
 
             for (int i = 0; i < thrusters.Length; i++)
             {
@@ -186,7 +188,7 @@ internal static class RcsAnalyzer
         {
             // Tsiolkovsky from full vehicle mass; upper bound, assumes all RCS
             // is spent prograde. UI labels this "~XX m/s" to flag the assumption.
-            float startMass = vehicle.TotalMass;
+            float startMass = totalMass;
             float burnable = MathF.Min(result.TotalCurrentMass, startMass - MinDryMass);
             if (burnable > 0f)
             {

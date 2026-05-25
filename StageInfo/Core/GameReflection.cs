@@ -45,6 +45,13 @@ internal static class GameReflection
             typeof(FlightComputerOutput).MakeByRefType(),
         });
 
+    public static readonly MethodInfo? VehicleEditingSpace_DrawStageWindow =
+        AccessTools.Method(typeof(VehicleEditingSpace), "DrawStageWindow",
+            new[] { typeof(Viewport) });
+
+    public static readonly MethodInfo? Program_DrawProgramMenusHook =
+        AccessTools.Method(typeof(Program), "DrawProgramMenusHook");
+
     public static bool ValidateCore()
     {
         var targets = new (string name, object? target)[]
@@ -70,6 +77,16 @@ internal static class GameReflection
         var targets = new (string name, object? target)[]
         {
             ("FlightComputer.UpdateBurnTarget", FlightComputer_UpdateBurnTarget),
+        };
+        return AllPresent(targets);
+    }
+
+    public static bool ValidateEditorTargets()
+    {
+        var targets = new (string name, object? target)[]
+        {
+            ("VehicleEditingSpace.DrawStageWindow", VehicleEditingSpace_DrawStageWindow),
+            ("Program.DrawProgramMenusHook", Program_DrawProgramMenusHook),
         };
         return AllPresent(targets);
     }
