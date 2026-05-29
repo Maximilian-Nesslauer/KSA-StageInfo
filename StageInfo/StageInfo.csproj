@@ -29,6 +29,10 @@
       <HintPath>..\..\..\refs\game\Brutal.ImGui.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Brutal.Core.Common">
+      <HintPath>..\..\..\refs\game\Brutal.Core.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="CommunityToolkit.HighPerformance">
       <HintPath>..\..\..\refs\game\CommunityToolkit.HighPerformance.dll</HintPath>
       <Private>false</Private>

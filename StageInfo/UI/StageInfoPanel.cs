@@ -6,6 +6,7 @@ using MethodInvoker = System.Reflection.MethodInvoker;
 using Brutal.ImGuiApi;
 using Brutal.Logging;
 using Brutal.Numerics;
+using Brutal.Pointers;
 using HarmonyLib;
 using KSA;
 using StageInfo.Analysis;
@@ -31,6 +32,14 @@ internal static class StageInfoPanel
     private static readonly float2 DefaultInitialWindowSize = new float2(700f, 700f);
 
     private static bool _runtimeApplied;
+
+    // Drag-and-drop state for the staging editor, mirrors the stock
+    // StagingWindow's private fields. Transient within a drag (set on a drag
+    // source, consumed on a drop target); reset on unload. Single window /
+    // single controlled vehicle, so static is safe.
+    private static Part? _draggedPart;
+    private static Sequence? _draggedSequence;
+    private static Stage? _draggedStage;
 
     // Closed-generic invokers for StagingWindow.DrawComponent<T>. Order
     // mirrors stock's per-part call order (Thruster, Engine, Decoupler).
@@ -88,6 +97,10 @@ internal static class StageInfoPanel
         // and stock's SetNextWindowSize(_initialSize, Once) is already spent
         // for this ImGui session, so there is nothing further to restore.
         _runtimeApplied = false;
+
+        _draggedPart = null;
+        _draggedSequence = null;
+        _draggedStage = null;
     }
 
     // First-frame setup: pick a width that matches the BurnControl gauge,
@@ -269,16 +282,22 @@ internal static class StageInfoPanel
 
     private static void DrawSequencesSection(Vehicle vehicle, object instance)
     {
-        ReadOnlySpan<Sequence> sequences = vehicle.Parts.SequenceList.Sequences;
+        PartTree partTree = vehicle.Parts;
+        SequenceList sequenceList = partTree.SequenceList;
+        ReadOnlySpan<Sequence> sequences = sequenceList.Sequences;
+        // OpenOnArrow + OpenOnDoubleClick so a click-drag on the row body starts
+        // a drag instead of toggling the node, matching the stock staging editor.
         ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags.DefaultOpen
             | ImGuiTreeNodeFlags.FramePadding
-            | ImGuiTreeNodeFlags.DrawLinesToNodes;
+            | ImGuiTreeNodeFlags.DrawLinesToNodes
+            | ImGuiTreeNodeFlags.OpenOnArrow
+            | ImGuiTreeNodeFlags.OpenOnDoubleClick;
 
+        // Empty sequences are shown (not skipped) so they can be dropped into,
+        // reordered, or deleted, matching the stock staging editor.
         for (int i = 0; i < sequences.Length; i++)
         {
             Sequence sequence = sequences[i];
-            if (sequence.Parts.IsEmpty)
-                continue;
 
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
@@ -287,9 +306,14 @@ internal static class StageInfoPanel
             if (!activated)
                 PushDimmedTextColor(extraDim: false);
 
-            string header = $"Sequence {sequence.Number}";
+            string header = string.Format(Inv, "Sequence {0}", sequence.Number);
             bool expanded = ImGui.TreeNodeEx(header, treeFlags);
+            float2 rectMin = ImGui.GetItemRectMin();
+            float2 rectMax = ImGui.GetItemRectMax();
             sequence.Highlight = ImGui.IsItemHovered();
+
+            HandleSequenceDragAndDrop(sequence, header, i, sequences,
+                sequenceList, partTree, rectMin, rectMax);
 
             if (AnalysisCache.TryGetSequenceInfo(sequence.Number, out var info) && info.EngineCount > 0)
                 DrawFuelProgressBar(info.FuelFraction);
@@ -301,7 +325,7 @@ internal static class StageInfoPanel
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
                 DrawPartsSubtree(sequence.Parts, instance, treeFlags,
-                    PartFilter.Sequenceable, HighlightTarget.Sequence);
+                    PartFilter.Sequenceable, HighlightTarget.Sequence, sequence.Number);
                 ImGui.TreePop();
             }
 
@@ -313,15 +337,19 @@ internal static class StageInfoPanel
     private static void DrawStagesSection(Vehicle vehicle, object instance)
     {
         // StageList.ResetCaches sorts ascending by Number.
-        ReadOnlySpan<Stage> stages = vehicle.Parts.StageList.Stages;
+        PartTree partTree = vehicle.Parts;
+        StageList stageList = partTree.StageList;
+        ReadOnlySpan<Stage> stages = stageList.Stages;
         ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags.FramePadding
-            | ImGuiTreeNodeFlags.DrawLinesToNodes;
+            | ImGuiTreeNodeFlags.DrawLinesToNodes
+            | ImGuiTreeNodeFlags.OpenOnArrow
+            | ImGuiTreeNodeFlags.OpenOnDoubleClick;
 
+        // Empty stages are shown (not skipped) so they can be dropped into,
+        // reordered, or deleted, matching the stock staging editor.
         for (int i = 0; i < stages.Length; i++)
         {
             Stage stage = stages[i];
-            if (stage.Parts.IsEmpty)
-                continue;
 
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
@@ -329,9 +357,14 @@ internal static class StageInfoPanel
             // Stages are always dim; they are informational only.
             PushDimmedTextColor(extraDim: false);
 
-            string header = $"Stage {stage.Number}";
+            string header = string.Format(Inv, "Stage {0}", stage.Number);
             bool expanded = ImGui.TreeNodeEx(header, treeFlags);
+            float2 rectMin = ImGui.GetItemRectMin();
+            float2 rectMax = ImGui.GetItemRectMax();
             stage.Highlight = ImGui.IsItemHovered();
+
+            HandleStageDragAndDrop(stage, header, i, stages,
+                stageList, partTree, rectMin, rectMax);
 
             DrawStageHeaderBars(stage.Number);
 
@@ -342,7 +375,7 @@ internal static class StageInfoPanel
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
                 DrawPartsSubtree(stage.Parts, instance, treeFlags,
-                    PartFilter.All, HighlightTarget.Stage);
+                    PartFilter.All, HighlightTarget.Stage, stage.Number);
                 ImGui.TreePop();
             }
 
@@ -438,7 +471,7 @@ internal static class StageInfoPanel
     }
 
     private static void DrawPartsSubtree(ReadOnlySpan<Part> parts, object instance,
-        ImGuiTreeNodeFlags treeFlags, PartFilter filter, HighlightTarget highlight)
+        ImGuiTreeNodeFlags treeFlags, PartFilter filter, HighlightTarget highlight, int groupNumber)
     {
         for (int j = 0; j < parts.Length; j++)
         {
@@ -449,7 +482,11 @@ internal static class StageInfoPanel
                 && !part.HasAny<EngineController>())
                 continue;
 
-            bool partExpanded = ImGui.TreeNodeEx(part.DisplayName, treeFlags);
+            // "###InstanceId" keeps the ImGui id unique even when two parts
+            // share a DisplayName, so drag-drop identity is unambiguous.
+            string label = string.Format(Inv, "{0}###{1}", part.DisplayName, part.InstanceId);
+            bool partExpanded = ImGui.TreeNodeEx(label, treeFlags);
+            HandlePartDragAndDrop(part, highlight, groupNumber);
             if (ImGui.IsItemHovered())
             {
                 if (highlight == HighlightTarget.Sequence) part.HighlightedForSequence = true;
@@ -465,6 +502,240 @@ internal static class StageInfoPanel
                 ImGui.TreePop();
             }
         }
+    }
+
+    #endregion
+
+    #region Drag and Drop
+
+    // Drag-drop / context-menu handling for a sequence header. Mutations are
+    // queued onto InputEvents.SequenceChangeBuffer (public API), which the
+    // stock pump drains at frame end. We never mutate the part tree inline.
+    private static void HandleSequenceDragAndDrop(
+        Sequence sequence, string label, int index, ReadOnlySpan<Sequence> sequences,
+        SequenceList sequenceList, PartTree partTree, float2 itemRectMin, float2 itemRectMax)
+    {
+        if (ImGui.BeginDragDropSource())
+        {
+            _draggedSequence = sequence;
+            ImGui.SetDragDropPayload("KSA_SEQ_ORDER"u8, default(Ptr), 0u);
+            ImGui.Text(label);
+            ImGui.EndDragDropSource();
+        }
+
+        if (ImGui.BeginPopupContextItem())
+        {
+            if (ImGui.MenuItem("Add Sequence Above"u8))
+                InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                {
+                    Operation = InputEvents.SequenceOp.Add,
+                    PartTree = partTree,
+                    SequenceList = sequenceList,
+                    Number = sequence.Number
+                });
+            if (ImGui.MenuItem("Add Sequence Below"u8))
+                InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                {
+                    Operation = InputEvents.SequenceOp.Add,
+                    PartTree = partTree,
+                    SequenceList = sequenceList,
+                    Number = sequence.Number + 1
+                });
+            if (sequence.Parts.IsEmpty && sequenceList.Count > 1)
+            {
+                ImGui.Separator();
+                if (ImGui.MenuItem("Delete Sequence"u8))
+                    InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                    {
+                        Operation = InputEvents.SequenceOp.Remove,
+                        PartTree = partTree,
+                        SequenceList = sequenceList,
+                        Sequence = sequence
+                    });
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginDragDropTarget())
+        {
+            DrawInsertionLine(itemRectMin, itemRectMax, out bool dropBelow);
+
+            if (!ImGui.AcceptDragDropPayload("KSA_SEQ"u8).IsNull() && _draggedPart != null)
+            {
+                InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                {
+                    Operation = InputEvents.SequenceOp.AssignPart,
+                    Part = _draggedPart,
+                    Number = sequence.Number
+                });
+                _draggedPart = null;
+            }
+            if (!ImGui.AcceptDragDropPayload("KSA_SEQ_ORDER"u8).IsNull() && _draggedSequence != null)
+            {
+                Sequence? insertBefore = !dropBelow
+                    ? sequence
+                    : (index + 1 < sequences.Length ? sequences[index + 1] : null);
+                InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                {
+                    Operation = InputEvents.SequenceOp.Reorder,
+                    SequenceList = sequenceList,
+                    Sequence = _draggedSequence,
+                    InsertBefore = insertBefore
+                });
+                _draggedSequence = null;
+            }
+            ImGui.EndDragDropTarget();
+        }
+    }
+
+    private static void HandleStageDragAndDrop(
+        Stage stage, string label, int index, ReadOnlySpan<Stage> stages,
+        StageList stageList, PartTree partTree, float2 itemRectMin, float2 itemRectMax)
+    {
+        if (ImGui.BeginDragDropSource())
+        {
+            _draggedStage = stage;
+            ImGui.SetDragDropPayload("KSA_STG_ORDER"u8, default(Ptr), 0u);
+            ImGui.Text(label);
+            ImGui.EndDragDropSource();
+        }
+
+        if (ImGui.BeginPopupContextItem())
+        {
+            if (ImGui.MenuItem("Add Stage Above"u8))
+                InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                {
+                    Operation = InputEvents.StageOp.Add,
+                    PartTree = partTree,
+                    StageList = stageList,
+                    Number = stage.Number
+                });
+            if (ImGui.MenuItem("Add Stage Below"u8))
+                InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                {
+                    Operation = InputEvents.StageOp.Add,
+                    PartTree = partTree,
+                    StageList = stageList,
+                    Number = stage.Number + 1
+                });
+            if (stage.Parts.IsEmpty && stageList.Count > 1)
+            {
+                ImGui.Separator();
+                if (ImGui.MenuItem("Delete Stage"u8))
+                    InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                    {
+                        Operation = InputEvents.StageOp.Remove,
+                        PartTree = partTree,
+                        StageList = stageList,
+                        Stage = stage
+                    });
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginDragDropTarget())
+        {
+            DrawInsertionLine(itemRectMin, itemRectMax, out bool dropBelow);
+
+            if (!ImGui.AcceptDragDropPayload("KSA_STG"u8).IsNull() && _draggedPart != null)
+            {
+                InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                {
+                    Operation = InputEvents.StageOp.AssignPart,
+                    Part = _draggedPart,
+                    Number = stage.Number
+                });
+                _draggedPart = null;
+            }
+            if (!ImGui.AcceptDragDropPayload("KSA_STG_ORDER"u8).IsNull() && _draggedStage != null)
+            {
+                Stage? insertBefore = !dropBelow
+                    ? stage
+                    : (index + 1 < stages.Length ? stages[index + 1] : null);
+                InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                {
+                    Operation = InputEvents.StageOp.Reorder,
+                    StageList = stageList,
+                    Stage = _draggedStage,
+                    InsertBefore = insertBefore
+                });
+                _draggedStage = null;
+            }
+            ImGui.EndDragDropTarget();
+        }
+    }
+
+    // A part row is both a drag source (so it can be moved) and a target (so a
+    // drop onto a sibling assigns to this same group). The payload tag is
+    // group-specific (KSA_SEQ vs KSA_STG) so a sequence-drag can't land on a
+    // stage row or vice versa.
+    //
+    // _draggedPart is set unconditionally on each drag start (stock uses ??= for
+    // parts but plain = for sequences/stages). With ??=, an abandoned drag leaves
+    // a stale reference that mis-assigns the next drop; the unconditional set
+    // matches stock's own sequence/stage handling and avoids that.
+    private static void HandlePartDragAndDrop(Part part, HighlightTarget target, int groupNumber)
+    {
+        if (target == HighlightTarget.Sequence)
+        {
+            if (ImGui.BeginDragDropSource())
+            {
+                _draggedPart = part;
+                ImGui.SetDragDropPayload("KSA_SEQ"u8, default(Ptr), 0u);
+                ImGui.Text(_draggedPart.DisplayName);
+                ImGui.EndDragDropSource();
+            }
+            if (ImGui.BeginDragDropTarget())
+            {
+                if (!ImGui.AcceptDragDropPayload("KSA_SEQ"u8).IsNull() && _draggedPart != null)
+                {
+                    InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+                    {
+                        Operation = InputEvents.SequenceOp.AssignPart,
+                        Part = _draggedPart,
+                        Number = groupNumber
+                    });
+                    _draggedPart = null;
+                }
+                ImGui.EndDragDropTarget();
+            }
+        }
+        else
+        {
+            if (ImGui.BeginDragDropSource())
+            {
+                _draggedPart = part;
+                ImGui.SetDragDropPayload("KSA_STG"u8, default(Ptr), 0u);
+                ImGui.Text(_draggedPart.DisplayName);
+                ImGui.EndDragDropSource();
+            }
+            if (ImGui.BeginDragDropTarget())
+            {
+                if (!ImGui.AcceptDragDropPayload("KSA_STG"u8).IsNull() && _draggedPart != null)
+                {
+                    InputEvents.StageChangeBuffer.Add(new InputEvents.StageChangeData
+                    {
+                        Operation = InputEvents.StageOp.AssignPart,
+                        Part = _draggedPart,
+                        Number = groupNumber
+                    });
+                    _draggedPart = null;
+                }
+                ImGui.EndDragDropTarget();
+            }
+        }
+    }
+
+    private static void DrawInsertionLine(float2 itemRectMin, float2 itemRectMax, out bool dropBelow)
+    {
+        float mouseY = ImGui.GetMousePos().Y;
+        dropBelow = mouseY >= (itemRectMin.Y + itemRectMax.Y) * 0.5f;
+        float lineY = dropBelow ? itemRectMax.Y : itemRectMin.Y;
+        float2 windowPos = ImGui.GetWindowPos();
+        ImGui.GetWindowDrawList().AddLine(
+            new float2(windowPos.X, lineY),
+            new float2(windowPos.X + ImGui.GetWindowWidth(), lineY),
+            ImGui.GetColorU32(ImGuiCol.DragDropTarget), 6f);
     }
 
     #endregion
