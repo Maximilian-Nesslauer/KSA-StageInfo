@@ -14,7 +14,7 @@ public sealed class Mod
 {
     private static Harmony? _harmony;
 
-    private const string TestedGameVersion = "v2026.5.11.4462";
+    private const string TestedGameVersion = "v2026.5.12.4510";
 
     [StarMapAllModsLoaded]
     public void OnFullyLoaded()
