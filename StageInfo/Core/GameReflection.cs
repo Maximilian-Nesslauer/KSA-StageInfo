@@ -19,6 +19,7 @@ internal static class GameReflection
         AccessTools.Method(typeof(Vehicle), "UpdateFromTaskResults", new[]
         {
             typeof(VehicleUpdateData).MakeByRefType(),
+            typeof(BubbleOrigin).MakeByRefType(),
             typeof(Vehicle),
             typeof(ReadOnlySpan<Vehicle>),
         });
