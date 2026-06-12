@@ -27,7 +27,7 @@ with atmosphere.
 
 This mod is written against the [StarMap loader](https://github.com/StarMapLoader/StarMap).
 
-Validated against KSA build version 2026.6.3.4568.
+Validated against KSA build version 2026.6.6.4601.
 
 ## Features
 
