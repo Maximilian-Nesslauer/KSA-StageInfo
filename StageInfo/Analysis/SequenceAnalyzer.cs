@@ -55,7 +55,8 @@ internal record struct BurnAnalysis
 
 /// <summary>
 /// Per-sequence Delta V analyzer. Walks sequences in activation order; for each,
-/// decouplers jettison subtrees, then engines burn their SameStage fuel pool.
+/// decouplers jettison subtrees, then engines burn the fuel their cores can
+/// reach (same stage by default, per each core's FlowRule).
 /// Main-thread only (shared pools).
 ///
 /// Verbose <paramref name="log"/> output is opt-in; the parameter threads
@@ -204,7 +205,7 @@ internal static class SequenceAnalyzer
             float ve = totalThrust / totalFlowRate;
             float isp = (float)(ve / Constants.STANDARD_GRAVITY);
 
-            // Fuel reachable from these engines via each core's SameStage walk.
+            // Fuel reachable from these engines via each core's FlowRule-matched walk.
             var (fuelMass, maxFuelMass) = ComputeSequenceFuel(
                 _pooledEngines, _pooledFuelClaimedTankIds, moleStates, log);
 
@@ -387,7 +388,7 @@ internal static class SequenceAnalyzer
     #region Fuel Calculation
 
     /// <summary>
-    /// Sums reachable propellant via each RocketCore's SameStage tank list.
+    /// Sums reachable propellant via each RocketCore's FlowRule-matched tank list.
     /// Records claimed tank IDs so later decoupler walks treat them as empty.
     /// </summary>
     private static (float current, float max) ComputeSequenceFuel(
@@ -411,7 +412,7 @@ internal static class SequenceAnalyzer
                     continue;
                 }
 
-                var (current, max) = WalkSameStage(
+                var (current, max) = WalkReachableTanks(
                     core.ResourceManager, fuelClaimedTankIds, moleStates, log);
                 totalCurrent += current;
                 totalMax += max;
@@ -421,7 +422,7 @@ internal static class SequenceAnalyzer
         return (totalCurrent, totalMax);
     }
 
-    private static (float current, float max) WalkSameStage(
+    private static (float current, float max) WalkReachableTanks(
         ResourceManager resourceManager,
         HashSet<ulong> fuelClaimedTankIds,
         ReadOnlySpan<MoleState> moleStates,
@@ -430,7 +431,7 @@ internal static class SequenceAnalyzer
         float current = 0f;
         float max = 0f;
         MemoryOwner<MemoryOwner<Tank>>? nodes =
-            resourceManager.FurtherestToNearestNodeSameStage;
+            FlowHelpers.SelectFlowNodes(resourceManager);
 
         if (nodes == null || nodes.Length == 0)
             return (0f, 0f);

@@ -135,10 +135,16 @@ internal static class RcsAnalyzer
             CollectMixHashes(engine.Cores, _engineSubstanceHashes);
         }
 
+        // Collect every active thruster's substances before any tank accumulation,
+        // so a tank shared by two thrusters with different propellants isn't claimed
+        // (and partly skipped) before the later thruster's substance is known.
+        // Mirrors the engine pre-pass above.
         bool hasActiveThruster = false;
         for (int i = 0; i < thrusters.Length; i++)
         {
-            if (thrusters[i].IsActive) { hasActiveThruster = true; break; }
+            if (!thrusters[i].IsActive) continue;
+            hasActiveThruster = true;
+            CollectMixHashes(thrusters[i].Cores, _rcsSubstanceHashes);
         }
 
         if (hasActiveThruster)
@@ -149,8 +155,6 @@ internal static class RcsAnalyzer
             {
                 ThrusterController thruster = thrusters[i];
                 if (!thruster.IsActive) continue;
-
-                CollectMixHashes(thruster.Cores, _rcsSubstanceHashes);
 
                 // Scalar sum (not vector) so opposing RCS pairs don't cancel;
                 // upper bound, treats every nozzle as if it could fire prograde.
@@ -217,7 +221,11 @@ internal static class RcsAnalyzer
     private static void AccumulateTanksFromCore(ResourceManager rm, ReadOnlySpan<MoleState> moleStates,
         ref VehicleRcsAnalysis result)
     {
-        MemoryOwner<MemoryOwner<Tank>>? nodes = rm.FurtherestToNearestNodeSameStage;
+        // Thrusters draw all-stage (FlowRule.NearestToFurtherest, set in
+        // PartTree.RecreateResourceManagers); reading the rule-matched list, not
+        // the same-stage subset, is what keeps cross-stage RCS tanks from being
+        // undercounted. See FlowHelpers.
+        MemoryOwner<MemoryOwner<Tank>>? nodes = FlowHelpers.SelectFlowNodes(rm);
         if (nodes == null || nodes.Length == 0) return;
 
         Span<MemoryOwner<Tank>> nodeSpan = nodes.Span;
