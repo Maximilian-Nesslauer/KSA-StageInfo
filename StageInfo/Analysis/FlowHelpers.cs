@@ -15,7 +15,7 @@ internal static class FlowHelpers
     /// identical to what the game consumes, instead of hard-coding the
     /// same-stage subset.
     /// </summary>
-    public static MemoryOwner<MemoryOwner<Tank>>? SelectFlowNodes(ResourceManager rm) => rm.FlowRule switch
+    public static Tank[][]? SelectFlowNodes(ResourceManager rm) => rm.FlowRule switch
     {
         FlowRule.FurtherestToNearest => rm.FurtherestToNearestNode,
         FlowRule.NearestToFurtherest => rm.NearestToFurtherestNode,

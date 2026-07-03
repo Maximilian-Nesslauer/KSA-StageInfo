@@ -430,19 +430,19 @@ internal static class SequenceAnalyzer
     {
         float current = 0f;
         float max = 0f;
-        MemoryOwner<MemoryOwner<Tank>>? nodes =
+        Tank[][]? nodes =
             FlowHelpers.SelectFlowNodes(resourceManager);
 
         if (nodes == null || nodes.Length == 0)
             return (0f, 0f);
 
-        Span<MemoryOwner<Tank>> nodeSpan = nodes.Span;
+        Span<Tank[]> nodeSpan = nodes;
         for (int i = 0; i < nodeSpan.Length; i++)
         {
             if (nodeSpan[i] == null || nodeSpan[i].Length == 0)
                 continue;
 
-            Span<Tank> tanks = nodeSpan[i].Span;
+            Span<Tank> tanks = nodeSpan[i];
             for (int j = 0; j < tanks.Length; j++)
             {
                 Tank tank = tanks[j];

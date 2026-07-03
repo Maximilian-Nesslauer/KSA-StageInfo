@@ -225,15 +225,15 @@ internal static class RcsAnalyzer
         // PartTree.RecreateResourceManagers); reading the rule-matched list, not
         // the same-stage subset, is what keeps cross-stage RCS tanks from being
         // undercounted. See FlowHelpers.
-        MemoryOwner<MemoryOwner<Tank>>? nodes = FlowHelpers.SelectFlowNodes(rm);
+        Tank[][]? nodes = FlowHelpers.SelectFlowNodes(rm);
         if (nodes == null || nodes.Length == 0) return;
 
-        Span<MemoryOwner<Tank>> nodeSpan = nodes.Span;
+        Span<Tank[]> nodeSpan = nodes;
         for (int i = 0; i < nodeSpan.Length; i++)
         {
             if (nodeSpan[i] == null || nodeSpan[i].Length == 0) continue;
 
-            Span<Tank> tanks = nodeSpan[i].Span;
+            Span<Tank> tanks = nodeSpan[i];
             for (int j = 0; j < tanks.Length; j++)
             {
                 Tank tank = tanks[j];
