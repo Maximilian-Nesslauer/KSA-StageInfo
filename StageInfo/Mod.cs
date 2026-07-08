@@ -14,7 +14,7 @@ public sealed class Mod
 {
     private static Harmony? _harmony;
 
-    private const string TestedGameVersion = "v2026.7.3.4826";
+    private const string TestedGameVersion = "v2026.7.4.4860";
 
     [StarMapAllModsLoaded]
     public void OnFullyLoaded()
@@ -41,7 +41,6 @@ public sealed class Mod
             return;
         }
 
-        bool panelOk = GameReflection.ValidatePanelTargets();
         bool burnOk = GameReflection.ValidateBurnTarget();
 
         // Always on: drives the analysis cache for the controlled vehicle.
@@ -50,15 +49,7 @@ public sealed class Mod
         // the stock recompute).
         _harmony.CreateClassProcessor(typeof(Patch_CorrectedBurnDuration)).Patch();
 
-        if (panelOk)
-        {
-            StageInfoPanel.ApplyPatches(_harmony);
-        }
-        else
-        {
-            DefaultCategory.Log.Warning(
-                "[StageInfo] Panel disabled, StagingWindow targets not found.");
-        }
+        StageInfoSection.ApplyPatches(_harmony);
 
         if (burnOk)
         {
@@ -71,17 +62,6 @@ public sealed class Mod
             DefaultCategory.Log.Warning(
                 "[StageInfo] FlightComputer.UpdateBurnTarget not found, burn duration correction disabled " +
                 "(cache still drives the panel, but fc.Burn is not modified).");
-        }
-
-        bool editorOk = GameReflection.ValidateEditorTargets();
-        if (editorOk)
-        {
-            EditorStageInfoPanel.ApplyPatches(_harmony);
-        }
-        else
-        {
-            DefaultCategory.Log.Warning(
-                "[StageInfo] Editor panel disabled, VehicleEditingSpace targets not found.");
         }
 
 #if DEBUG
@@ -100,8 +80,7 @@ public sealed class Mod
         _harmony?.UnpatchAll(_harmony.Id);
         _harmony = null;
 
-        StageInfoPanel.Reset();
-        EditorStageInfoPanel.Reset();
+        StageInfoSection.Reset();
         DebugLoggingPatches.Reset();
         AnalysisCache.Reset();
         EditorAnalysisCache.Reset();

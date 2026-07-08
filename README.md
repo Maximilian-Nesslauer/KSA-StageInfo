@@ -1,57 +1,64 @@
 # StageInfo [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Extra info in the stock Stage/Sequence window for [Kitten Space Agency](https://ahwoo.com/app/100000/kitten-space-agency).
+Extra info and Flight performance readouts in the stock staging window for [Kitten Space Agency](https://ahwoo.com/app/100000/kitten-space-agency).
 
-Keeps the stock layout (Sequences section on top, Stages section below)
-and augments each row: Sequences get Delta V / TWR / burn time / ISP,
-Stages get fuel pool / mass / engine count / decoupler count. Also adds
-a totals footer and a multi-stage-aware burn duration for auto-burns.
+The stock staging window computes per-sequence Delta V and TWR in the vehicle editor only, with a fixed vacuum / sea-level toggle.
 
-In the vehicle editor (Shift+E), a standalone StageInfo panel shows
-the same analysis for the rocket you are currently building, with a
-body selector for TWR reference and a Vacuum/ASL toggle for bodies
-with atmosphere.
+StageInfo adds its readouts to the same window (both the Sequences and the Resource Groups tab) so they also work in flight, and goes deeper:
+
+It adds burn time, ISP, TWR against a selectable body's gravity, live fuel state, RCS budgets, and a corrected multi-stage burn duration for auto-burns.
+
+A mode selector sits at the top of each tab; per-sequence and per-group numbers render inline in the tree (with fuel and RCS bars on each header), and the vehicle totals sit in a footer below.
 
 <table>
   <tr>
-    <th align="center">Stock</th>
-    <th align="center">With StageInfo</th>
-    <th align="center">Editor Panel</th>
+    <th align="center">Flight - Sequences</th>
+    <th align="center">Flight - Resource Groups</th>
   </tr>
   <tr valign="top">
-    <td><img src="images/stock.png" alt="Stock staging window" width="350" /></td>
-    <td><img src="images/stageinfo.png" alt="Staging window with StageInfo" width="350" /></td>
-    <td><img src="images/EditorStageInfoPanel.png" alt="StageInfo panel in the vehicle editor" width="350" /></td>
+    <td><img src="images/flight-sequences.jpg" alt="StageInfo on the Sequences tab in flight: per-sequence Delta V, TWR, burn time, ISP, fuel bars, and burn allocation" width="350" /></td>
+    <td><img src="images/flight-resource-groups.jpg" alt="StageInfo on the Resource Groups tab in flight: per-group mass, fuel pool, RCS, with fuel and RCS bars" width="350" /></td>
+  </tr>
+  <tr>
+    <th align="center">Editor - Sequences</th>
+    <th align="center">Editor - Resource Groups</th>
+  </tr>
+  <tr valign="top">
+    <td><img src="images/editor-sequences.jpg" alt="StageInfo on the Sequences tab in the editor, with a body selector for the TWR reference gravity" width="350" /></td>
+    <td><img src="images/editor-resource-groups.jpg" alt="StageInfo on the Resource Groups tab in the editor" width="350" /></td>
   </tr>
 </table>
 
 This mod is written against the [StarMap loader](https://github.com/StarMapLoader/StarMap).
 
-Validated against KSA build version 2026.7.3.4826.
+Validated against KSA build version 2026.7.4.4860.
 
 ## Features
 
-- **Per-sequence Delta V**, TWR, burn time, ISP, and fuel fraction on
-  each Sequence row.
-- **Per-stage fuel pool, mass, engine count, decoupler count** on each
-  Stage row.
-- **Per-stage RCS bar** in the stage header next to the fuel bar (blue,
-  turns red below 20%). Substances no active main engine can consume
-  are listed in the expanded stage detail (e.g. `MMH 1,180/1,761 kg
-  NTO 1,888/2,817 kg`) with a hover tooltip for the full substance name
-  and current/max mass. Shared tanks (e.g. LFOX feeding both the main
-  engine and a vernier thruster) stay on the main fuel bar so nothing
-  is counted twice.
+- **Per-sequence Delta V, TWR, burn time, ISP, and live fuel fraction**
+  in flight. A fuel bar sits on each sequence header; expand a sequence to
+  see the numbers inline, above its parts. When a burn is planned, the row
+  shows how much of its dV the burn consumes, colored green to red by
+  consumption.
+- **Per-group mass, fuel pool, engine count, decoupler count** on the
+  Resource Groups tab, inline under each group with a fuel bar and an RCS
+  bar on the group header. Substances no active main engine can consume
+  are listed as RCS entries (e.g. `MMH 1,180/1,761 kg`) with a hover
+  tooltip for the full substance name and current/max mass. Shared tanks
+  (e.g. LFOX feeding both the main engine and a vernier thruster) stay in
+  the main fuel pool so nothing is counted twice.
 - **RCS dV budget** as a footer line (`RCS dV ~X m/s`). Hover for an
   engineering tooltip listing effective ISP, total propellant, and
   scalar peak thrust.
 - **Display modes** Auto / VAC / ASL / VAC+ASL / Planning for previewing
   dV under different ambient conditions (Planning lets you pick any
   celestial body in the current system).
-- **Editor panel** in the vehicle editor (Shift+E) with per-sequence
-  dV/TWR/burn/ISP, fuel and RCS bars, body selector for TWR reference,
-  and a Vacuum/ASL toggle for bodies with atmosphere. Toggle via the
-  "StageInfo" menu tab in the editor menu bar.
+- **Editor readouts** in the vehicle editor's staging window: the same
+  per-sequence Delta V / TWR / burn time / ISP line, with a body selector
+  for the TWR reference gravity and a Vacuum toggle for bodies with
+  atmosphere. The stock editor also shows dV/TWR, but fixed to standard
+  gravity and a vacuum / sea-level toggle; StageInfo's numbers account for
+  the selected body's gravity and reachable-only propellant.
 - **Totals footer** with total Delta V, planned burn dV, and burn time.
   Turns red when the planned burn exceeds available dV.
 - **Corrected burn duration** for multi-stage burns: the stock game
@@ -96,8 +103,8 @@ Required only to build the mod from source. Targets **.NET 10**.
 ## Notes
 
 - Sequences are ignition groups (what activates when you press the stage
-  key). Stages are jettison groups / fuel pools. The stock window
-  already shows both.
+  key). Resource groups (called stages in older game versions) are
+  jettison groups / fuel pools. The stock window shows both as tabs.
 
 ## Community
 

@@ -24,8 +24,9 @@ internal record struct VehicleFuelAnalysis
 }
 
 /// <summary>
-/// Per-stage fuel pool + mass snapshot. Stages are jettison / fuel-pool
-/// groups; dV is a sequence-level concept and lives in SequenceAnalyzer.
+/// Per-group fuel pool + mass snapshot. Resource groups (Part.Stage
+/// numbers) are jettison / fuel-pool groups; dV is a sequence-level
+/// concept and lives in SequenceAnalyzer.
 /// </summary>
 internal static class StageFuelAnalyzer
 {
@@ -55,7 +56,7 @@ internal static class StageFuelAnalyzer
         _pooledStages.Clear();
         _stageIndex.Clear();
 
-        ReadOnlySpan<Stage> stages = parts.StageList.Stages;
+        ReadOnlySpan<ResourceGroup> stages = parts.ResourceGroupList.Stages;
         for (int i = 0; i < stages.Length; i++)
         {
             int num = stages[i].Number;
@@ -78,7 +79,7 @@ internal static class StageFuelAnalyzer
                     DefaultCategory.Log.Warning(
                         $"[StageInfo] StageFuelAnalyzer: part '{part.DisplayName}' " +
                         $"(id={part.InstanceId}) has Stage={stageNum} not in " +
-                        "StageList.Stages, recovering. (logged once per session)");
+                        "ResourceGroupList.Stages, recovering. (logged once per session)");
                 }
                 idx = _pooledStages.Count;
                 _stageIndex[stageNum] = idx;

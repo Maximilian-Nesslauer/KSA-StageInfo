@@ -6,9 +6,9 @@ using KSA;
 namespace StageInfo.Core;
 
 /// <summary>
-/// Non-public game internals. Resolved once at load; ValidatePanelTargets and
+/// Non-public game internals. Resolved once at load; ValidateCore and
 /// ValidateBurnTarget flag missing entries so each feature can degrade
-/// independently. Public APIs use plain [HarmonyPatch] instead.
+/// independently. Public APIs use plain Harmony patches instead.
 /// </summary>
 internal static class GameReflection
 {
@@ -26,21 +26,6 @@ internal static class GameReflection
             typeof(Brutal.Numerics.double3),
         });
 
-    public static readonly Type? StagingWindowType =
-        typeof(Staging).GetNestedType("StagingWindow", BindingFlags.NonPublic);
-
-    public static readonly MethodInfo? StagingWindow_DrawContent =
-        StagingWindowType?.GetMethod("DrawContent", BindingFlags.Public | BindingFlags.Instance);
-
-    // Open generic; features instantiate it per module type. Parameter types
-    // pinned so a future overload doesn't break GetMethod with AmbiguousMatchException.
-    public static readonly MethodInfo? StagingWindow_DrawComponentOpen =
-        StagingWindowType?.GetMethod("DrawComponent",
-            BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null,
-            types: new[] { typeof(Part) },
-            modifiers: null);
-
     public static readonly MethodInfo? FlightComputer_UpdateBurnTarget =
         AccessTools.Method(typeof(FlightComputer), "UpdateBurnTarget", new[]
         {
@@ -48,12 +33,16 @@ internal static class GameReflection
             typeof(FlightComputerOutput).MakeByRefType(),
         });
 
-    public static readonly MethodInfo? VehicleEditingSpace_DrawStageWindow =
-        AccessTools.Method(typeof(VehicleEditingSpace), "DrawStageWindow",
-            new[] { typeof(Viewport) });
+    // The flight staging window is a private nested type; DrawContent runs
+    // inside the window's ImGui Begin/End, so a prefix there can set a better
+    // default window size. Optional: if missing, sizing is skipped.
+    public static readonly Type? ResourceGroupsWindowType =
+        typeof(ResourceGroups).GetNestedType("ResourceGroupsWindow", BindingFlags.NonPublic);
 
-    public static readonly MethodInfo? Program_DrawProgramMenusHook =
-        AccessTools.Method(typeof(Program), "DrawProgramMenusHook");
+    public static readonly MethodInfo? ResourceGroupsWindow_DrawContent =
+        ResourceGroupsWindowType?.GetMethod("DrawContent",
+            BindingFlags.Public | BindingFlags.Instance,
+            binder: null, types: new[] { typeof(Viewport) }, modifiers: null);
 
     public static bool ValidateCore()
     {
@@ -64,32 +53,11 @@ internal static class GameReflection
         return AllPresent(targets);
     }
 
-    public static bool ValidatePanelTargets()
-    {
-        var targets = new (string name, object? target)[]
-        {
-            ("Staging.StagingWindow",          StagingWindowType),
-            ("StagingWindow.DrawContent",      StagingWindow_DrawContent),
-            ("StagingWindow.DrawComponent<T>", StagingWindow_DrawComponentOpen),
-        };
-        return AllPresent(targets);
-    }
-
     public static bool ValidateBurnTarget()
     {
         var targets = new (string name, object? target)[]
         {
             ("FlightComputer.UpdateBurnTarget", FlightComputer_UpdateBurnTarget),
-        };
-        return AllPresent(targets);
-    }
-
-    public static bool ValidateEditorTargets()
-    {
-        var targets = new (string name, object? target)[]
-        {
-            ("VehicleEditingSpace.DrawStageWindow", VehicleEditingSpace_DrawStageWindow),
-            ("Program.DrawProgramMenusHook", Program_DrawProgramMenusHook),
         };
         return AllPresent(targets);
     }

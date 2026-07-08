@@ -24,13 +24,23 @@ internal static class StageInfoUiHelpers
         return min > 0 ? $"{h}h {min}m" : $"{h}h";
     }
 
-    internal static void DrawFuelProgressBar(float fuelFraction)
+    // sameLine=true attaches the bar to the current line (e.g. a tree-node
+    // header); sameLine=false draws it on its own line.
+    internal static void DrawFuelProgressBar(float fuelFraction, bool sameLine = true)
     {
-        ImGui.SameLine();
+        if (sameLine)
+            ImGui.SameLine();
         float availWidth = ImGui.GetContentRegionAvail().X;
         float pctTextWidth = ImGui.CalcTextSize("100% fuel"u8).X + 8f;
         float barWidth = availWidth - pctTextWidth;
-        if (barWidth < 30f) return;
+        if (barWidth < 30f)
+        {
+            // A committed SameLine with no widget would pull the caller's next
+            // line onto this row; cancel it. Nothing to cancel on its own line.
+            if (sameLine)
+                ImGui.NewLine();
+            return;
+        }
 
         float lineHeight = ImGui.GetTextLineHeight();
         float barHeight = lineHeight * 0.6f;

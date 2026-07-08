@@ -100,6 +100,10 @@ internal static class StageInfoSettings
         {
             if (astro is Vehicle)
                 continue;
+            // Stars are IParentBody but TWR / sea-level pressure against a star
+            // is meaningless as a launch reference, so they're left out.
+            if (astro.IsStar())
+                continue;
             if (astro is IParentBody)
                 _bodiesCache.Add(astro);
         }
