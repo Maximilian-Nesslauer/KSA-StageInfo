@@ -212,7 +212,7 @@ internal static class RcsAnalyzer
     {
         foreach (RocketCore core in cores)
         {
-            ReadOnlySpan<Reactant> reactants = core.Combustion.Reactants;
+            ReadOnlySpan<Reactant> reactants = core.Reaction.ReactantMix.Reactants;
             for (int i = 0; i < reactants.Length; i++)
                 sink.Add(reactants[i].SubstancePhase.Hash);
         }
@@ -306,7 +306,7 @@ internal static class RcsAnalyzer
             }
         }
 
-        string longName = phase.Substance?.Name ?? phase.Name;
+        string longName = phase.Substance?.FullName ?? phase.Name;
         list.Add(new RcsSubstanceInfo
         {
             Hash = hash,
