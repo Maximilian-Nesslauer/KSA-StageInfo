@@ -2,12 +2,29 @@ using System;
 using System.Globalization;
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using KSA;
 
 namespace StageInfo.UI;
 
 internal static class StageInfoUiHelpers
 {
     internal static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
+    // Buffered like stock's own Vac/Atm button (SequenceList enqueues the same
+    // op): the change applies in the next input pass instead of mid-draw, which
+    // keeps it off the worker recompute that reads Sequence.Environment.
+    internal static void EnqueueSetSequenceEnvironment(PartTree parts, Sequence sequence,
+        PerformanceEnvironment environment)
+    {
+        InputEvents.SequenceChangeBuffer.Add(new InputEvents.SequenceChangeData
+        {
+            Operation = InputEvents.SequenceOp.SetEnvironment,
+            PartTree = parts,
+            SequenceList = parts.SequenceList,
+            Sequence = sequence,
+            Environment = environment
+        });
+    }
 
     internal static string FormatBurnTime(float seconds)
     {

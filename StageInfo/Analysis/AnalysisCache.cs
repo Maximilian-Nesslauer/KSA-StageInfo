@@ -21,16 +21,18 @@ internal sealed class AnalysisSlot
     public readonly List<BurnSequenceAllocation> Allocations = new();
     public readonly Dictionary<int, BurnSequenceAllocation> AllocationLookup = new();
 
-    public void RunSequenceAnalysis(Vehicle vehicle, float ambientPressure, float? surfaceGravity)
+    public void RunSequenceAnalysis(Vehicle vehicle, float ambientPressure, float? surfaceGravity,
+        PerSequenceEnv? perSequenceEnv = null)
     {
         float sg = surfaceGravity ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
-        RunSequenceAnalysis(vehicle.Parts, vehicle.TotalMass, ambientPressure, sg);
+        RunSequenceAnalysis(vehicle.Parts, vehicle.TotalMass, ambientPressure, sg, perSequenceEnv);
     }
 
-    public void RunSequenceAnalysis(PartTree parts, float totalMass, float ambientPressure, float surfaceGravity)
+    public void RunSequenceAnalysis(PartTree parts, float totalMass, float ambientPressure, float surfaceGravity,
+        PerSequenceEnv? perSequenceEnv = null)
     {
         var result = SequenceAnalyzer.Analyze(parts, totalMass,
-            ambientPressure, surfaceGravity);
+            ambientPressure, surfaceGravity, perSequenceEnv: perSequenceEnv);
 
         SequenceList.Clear();
         SequenceList.AddRange(result.Sequences);
@@ -169,7 +171,14 @@ internal static class AnalysisCache
         SecondaryLabel = env.SecondaryLabel;
         IsPrimaryCurrentCondition = env.IsPrimaryCurrentCondition;
 
-        _primary.RunSequenceAnalysis(vehicle, env.PrimaryPressure, env.PrimarySurfaceGravity);
+        _primary.RunSequenceAnalysis(vehicle, env.PrimaryPressure, env.PrimarySurfaceGravity,
+            env.PrimaryPerSequence);
+
+        // Custom mode's (VAC)/(ATM)/(mixed) label depends on which sequences
+        // actually burned and at what pressure, so it is derived from the
+        // analyzed rows rather than from every toggled sequence.
+        if (env.PrimaryPerSequence.HasValue)
+            PrimaryLabel = EnvironmentHelpers.AtmosphericLabel(_primary.Sequences);
 
         if (env.SecondaryPressure.HasValue)
             _secondary.RunSequenceAnalysis(vehicle, env.SecondaryPressure.Value, env.SecondarySurfaceGravity);

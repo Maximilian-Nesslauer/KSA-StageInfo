@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using KSA;
 using StageInfo.Analysis;
@@ -7,18 +8,23 @@ namespace StageInfo.UI;
 internal readonly record struct EditorEnvironment(
     float Pressure,
     float SurfaceGravity,
-    string Label
+    PerSequenceEnv PerSequence
 );
 
+/// <summary>
+/// Editor panel state: body selection plus the environment resolver. The
+/// editor always evaluates per-sequence (each sequence at its own stock
+/// Vac/Atm toggle against the selected body); the VAC / ASL dropdown entries
+/// are presets that write those toggles.
+/// </summary>
 internal static class EditorStageInfoSettings
 {
     public static string? SelectedBodyId;
-    public static bool UseVacuum = true;
 
     private static readonly List<Astronomical> _bodiesCache = new();
     private static CelestialSystem? _bodiesCacheSystem;
 
-    public static EditorEnvironment ResolveEnvironment()
+    public static EditorEnvironment ResolveEnvironment(PartTree parts)
     {
         IParentBody? body = FindSelectedBody();
         if (body == null)
@@ -32,21 +38,69 @@ internal static class EditorStageInfoSettings
         }
 
         if (body == null)
-            return new EditorEnvironment(0f, 0f, "(VAC)");
+            return new EditorEnvironment(0f, 0f, new PerSequenceEnv(0f, -1));
 
         float gravity = EnvironmentHelpers.ComputeSurfaceGravity(body);
-        string bodyName = (body as Astronomical)?.Id ?? "?";
+        float seaLevel = EnvironmentHelpers.GetSeaLevelPressure(body);
 
-        if (UseVacuum)
-            return new EditorEnvironment(0f, gravity, "(VAC)");
+        // Each sequence at its own Vac/Atm toggle (Vac -> 0, Atm -> the selected
+        // body's sea level). No sequence is active in the editor, so
+        // ActiveSequenceNumber is -1. Pressure feeds the vehicle-wide RCS
+        // analysis: vacuum when every toggle is Vac, otherwise the body's
+        // surface, matching the sequences' dominant environment.
+        float rcsPressure = AllSequencesVacuum(parts) ? 0f : seaLevel;
+        return new EditorEnvironment(rcsPressure, gravity, new PerSequenceEnv(seaLevel, -1));
+    }
 
-        float pressure = EnvironmentHelpers.GetSeaLevelPressure(body);
-        bool hasAtmosphere = pressure > 0f;
-        string label = hasAtmosphere
-            ? $"({bodyName} ASL)"
-            : $"({bodyName})";
+    /// <summary>
+    /// Writes every sequence's stock Vac/Atm toggle to one uniform environment.
+    /// Buffered like stock's own button, so the toggles apply in the next input
+    /// pass and the derived label follows one frame later.
+    /// </summary>
+    public static void ApplyUniformPreset(PartTree parts, bool atmospheric)
+    {
+        PerformanceEnvironment environment = atmospheric
+            ? PerformanceEnvironment.Atmospheric
+            : PerformanceEnvironment.Vacuum;
+        ReadOnlySpan<Sequence> sequences = parts.SequenceList.Sequences;
+        for (int i = 0; i < sequences.Length; i++)
+            StageInfoUiHelpers.EnqueueSetSequenceEnvironment(parts, sequences[i], environment);
+    }
 
-        return new EditorEnvironment(pressure, gravity, label);
+    /// <summary>
+    /// Dropdown label derived from the visible toggles: "VAC" when every
+    /// sequence toggle is Vac, "ASL" when every one is Atm, else "Custom".
+    /// </summary>
+    public static string DeriveCustomLabel(PartTree parts)
+    {
+        ReadOnlySpan<Sequence> sequences = parts.SequenceList.Sequences;
+        if (sequences.IsEmpty)
+            return "Custom";
+
+        bool anyVac = false;
+        bool anyAtm = false;
+        for (int i = 0; i < sequences.Length; i++)
+        {
+            if (sequences[i].Environment == PerformanceEnvironment.Atmospheric)
+                anyAtm = true;
+            else
+                anyVac = true;
+        }
+
+        if (anyVac && anyAtm)
+            return "Custom";
+        return anyAtm ? "ASL" : "VAC";
+    }
+
+    private static bool AllSequencesVacuum(PartTree parts)
+    {
+        ReadOnlySpan<Sequence> sequences = parts.SequenceList.Sequences;
+        for (int i = 0; i < sequences.Length; i++)
+        {
+            if (sequences[i].Environment == PerformanceEnvironment.Atmospheric)
+                return false;
+        }
+        return true;
     }
 
     public static List<Astronomical> GetCelestialBodies()
@@ -85,15 +139,8 @@ internal static class EditorStageInfoSettings
     public static void Reset()
     {
         SelectedBodyId = null;
-        UseVacuum = true;
         _bodiesCache.Clear();
         _bodiesCacheSystem = null;
-    }
-
-    public static bool SelectedBodyHasAtmosphere()
-    {
-        IParentBody? body = FindSelectedBody();
-        return body != null && EnvironmentHelpers.GetSeaLevelPressure(body) > 0f;
     }
 
     private static IParentBody? FindSelectedBody()

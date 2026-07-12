@@ -19,11 +19,15 @@ namespace StageInfo.UI;
 /// tab; transpilers on SequenceList.DrawSequenceContent and
 /// ResourceGroupList.DrawResourceGroupContent insert a per-row hook right after
 /// each header so the fuel / RCS bars and the detail line render inline in the
-/// stock tree. The sequence postfix draws a totals footer; the group postfix
-/// draws a per-group block, but only as a fallback: when its transpiler could
-/// not be applied, or when stock is in automatic mode (the default) and drew no
-/// group tree for the hook to run against. If a transpiler's anchors no longer
-/// match after a game update, the mod logs a warning and uses the rows-below
+/// stock tree. Sequence fuel bars re-enter the header row next to the stock
+/// Vac/Atm toggle, and the flight-active sequence (whose toggle stock omits)
+/// gets StageInfo's own Amb/Vac/Atm button in the same slot; both require the
+/// stock perf line to be suppressed and fall back to an own-line bar otherwise.
+/// The sequence postfix draws a totals footer; the group postfix draws a
+/// per-group block, but only as a fallback: when its transpiler could not be
+/// applied, or when stock is in automatic mode (the default) and drew no group
+/// tree for the hook to run against. If a transpiler's anchors no longer match
+/// after a game update, the mod logs a warning and uses the rows-below
 /// fallback. The stock window keeps full ownership of the tree and all edits.
 /// </summary>
 internal static class StageInfoSection
@@ -50,6 +54,7 @@ internal static class StageInfoSection
 
     private static bool _sequenceInlineActive;
     private static bool _groupInlineActive;
+    private static bool _stockPerfSuppressed;
 
     // The stock flight staging window opens at 400x300 in the top-right
     // corner. On its first draw we widen it to the burn-control gauge and
@@ -57,20 +62,6 @@ internal static class StageInfoSection
     // resize afterwards.
     private static bool _windowSizeApplied;
     private const float FallbackWindowWidth = 400f;
-
-    // Enum.GetValues<T>() allocates; cache it.
-    private static readonly StageDisplayMode[] AllModes =
-        Enum.GetValues<StageDisplayMode>();
-
-    private static string ModeLabel(StageDisplayMode mode) => mode switch
-    {
-        StageDisplayMode.Auto => "Auto",
-        StageDisplayMode.Vac => "VAC",
-        StageDisplayMode.Asl => "ASL",
-        StageDisplayMode.VacAsl => "VAC + ASL",
-        StageDisplayMode.Planning => "Planning",
-        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unhandled StageDisplayMode"),
-    };
 
     public static void ApplyPatches(Harmony harmony)
     {
@@ -87,6 +78,7 @@ internal static class StageInfoSection
             finalizer: new HarmonyMethod(typeof(StageInfoSection), nameof(DrawSequenceContentFinalizer)));
         _sequenceInlineActive = TryPatchTranspiler(harmony, drawSequences,
             nameof(DrawSequenceContentTranspiler), "sequence");
+        TryApplyStockSuppression(harmony, drawSequences);
 
         MethodInfo drawGroups =
             AccessTools.Method(typeof(ResourceGroupList), nameof(ResourceGroupList.DrawResourceGroupContent));
@@ -108,10 +100,56 @@ internal static class StageInfoSection
                 "[StageInfo] Flight staging window not found, default sizing skipped.");
         }
 
+        // Editor analysis recompute gate: every stock invalidation marks the
+        // editor cache dirty, so Update can skip clean frames.
+        harmony.Patch(
+            AccessTools.Method(typeof(SequencePerformanceList), nameof(SequencePerformanceList.SetDirty)),
+            postfix: new HarmonyMethod(typeof(StageInfoSection), nameof(PerformanceSetDirtyPostfix)));
+
+        // Two-way dropdown sync: a Vac/Atm toggle click while a uniform what-if
+        // mode (VAC+ASL / Planning) is shown returns the panel to Custom.
+        harmony.Patch(
+            AccessTools.PropertySetter(typeof(Sequence), nameof(Sequence.Environment)),
+            prefix: new HarmonyMethod(typeof(StageInfoSection), nameof(SequenceEnvironmentSetterPrefix)),
+            postfix: new HarmonyMethod(typeof(StageInfoSection), nameof(SequenceEnvironmentSetterPostfix)));
+
         if (DebugConfig.StageInfo)
             Brutal.Logging.DefaultCategory.Log.Debug(
                 $"[StageInfo] Staging section patches applied (seqInline={_sequenceInlineActive}, " +
-                $"groupInline={_groupInlineActive}).");
+                $"groupInline={_groupInlineActive}, stockPerfSuppressed={_stockPerfSuppressed}).");
+    }
+
+    // Suppresses the stock per-sequence dV/TWR/Isp line so StageInfo's readout is
+    // the single source. Gated on the stock performance property still being
+    // resolvable; the transpiler degrades to a no-op if the IL pattern moved. If
+    // suppression cannot apply, the stock line stays (duplicated with the inline
+    // row) rather than the panel breaking. _stockPerfSuppressed is set inside the
+    // transpiler, which runs during Patch and alone knows whether it rewrote the IL.
+    private static void TryApplyStockSuppression(Harmony harmony, MethodInfo target)
+    {
+        bool anchorPresent = AccessTools.PropertyGetter(
+            typeof(SequencePerformanceList),
+            nameof(SequencePerformanceList.PerformanceSequences)) != null;
+        if (!anchorPresent)
+        {
+            Brutal.Logging.DefaultCategory.Log.Warning(
+                "[StageInfo] Stock performance property not found; stock dV/TWR/Isp " +
+                "line not suppressed (game UI code changed).");
+            return;
+        }
+
+        try
+        {
+            harmony.Patch(target,
+                transpiler: new HarmonyMethod(typeof(StageInfoSection),
+                    nameof(DrawSequenceContentSuppressTranspiler)));
+        }
+        catch (Exception e)
+        {
+            Brutal.Logging.DefaultCategory.Log.Warning(
+                $"[StageInfo] Failed to apply stock dV/TWR/Isp suppression ({e.Message}); " +
+                "stock line left intact.");
+        }
     }
 
     // The transpilers are the only fragile patches; apply each separately so an
@@ -142,6 +180,7 @@ internal static class StageInfoSection
         _inEditorStageWindow = false;
         _sequenceInlineActive = false;
         _groupInlineActive = false;
+        _stockPerfSuppressed = false;
         _windowSizeApplied = false;
     }
 
@@ -199,6 +238,39 @@ internal static class StageInfoSection
         if (DebugConfig.StageInfo)
             Brutal.Logging.DefaultCategory.Log.Debug(
                 $"[StageInfo] Sized staging window to {newSize.X} x {newSize.Y} at ({newPos.X}, {newPos.Y}).");
+    }
+
+    #endregion
+
+    #region Stock model observers
+
+    static void PerformanceSetDirtyPostfix() => EditorAnalysisCache.MarkDirty();
+
+    static void SequenceEnvironmentSetterPrefix(Sequence __instance,
+        ref PerformanceEnvironment __state) => __state = __instance.Environment;
+
+    static void SequenceEnvironmentSetterPostfix(Sequence __instance,
+        PerformanceEnvironment __state)
+    {
+        if (__state == __instance.Environment)
+            return;
+
+        // Only toggles on the controlled vehicle should move the flight panel
+        // back to Custom; SequenceList.ApplyEnvironments on an unrelated
+        // spawning vehicle lands in this setter too. Editing the controlled
+        // vehicle shares its PartTree, so editor toggles on it still count.
+        Vehicle? vehicle = Program.ControlledVehicle;
+        if (vehicle == null)
+            return;
+        ReadOnlySpan<Sequence> sequences = vehicle.Parts.SequenceList.Sequences;
+        for (int i = 0; i < sequences.Length; i++)
+        {
+            if (ReferenceEquals(sequences[i], __instance))
+            {
+                StageInfoSettings.NotifySequenceEnvironmentChanged();
+                return;
+            }
+        }
     }
 
     #endregion
@@ -281,27 +353,42 @@ internal static class StageInfoSection
 
     internal static void AfterSequenceHeader(Sequence sequence, bool expanded)
     {
+        // The transpiler supplies the node's expanded flag, but the detail is now
+        // drawn regardless: stock draws its per-sequence line on collapsed headers
+        // too, so gating on expansion would hide the readout when collapsed.
+        _ = expanded;
         if (_sequenceHost == DrawHost.Flight)
-            DrawFlightSequenceInline(sequence, expanded);
+            DrawFlightSequenceInline(sequence);
         else if (_sequenceHost == DrawHost.Editor)
-            DrawEditorSequenceInline(sequence, expanded);
+            DrawEditorSequenceInline(sequence);
     }
 
-    private static void DrawFlightSequenceInline(Sequence sequence, bool expanded)
+    private static void DrawFlightSequenceInline(Sequence sequence)
     {
         if (!AnalysisCache.TryGetSequenceInfo(sequence.Number, out var info)
             || info.EngineCount == 0)
             return;
 
-        // Fuel bar on the header row, always: the header stays visible when the
-        // node is collapsed. The editor-only env button is absent in flight.
-        if (info.MaxFuelMass > 0f)
-            DrawFuelProgressBar(info.FuelFraction);
+        bool isActive = Program.ControlledVehicle is { } vehicle
+            && sequence.Number == vehicle.Parts.SequenceList.ActiveSequence;
 
-        // The dV / TWR / burn / Isp detail follows the stock tree: shown only
-        // when the sequence node is expanded.
-        if (!expanded)
-            return;
+        // The fuel bar goes onto the header row, between the sequence label and
+        // the right-aligned Vac/Atm button (stock's on non-active sequences,
+        // ours on the active one). The header-row re-entry assumes nothing was
+        // drawn between the header and this hook, which only holds while the
+        // stock perf line is suppressed; the fallback keeps the bar on its own
+        // line. Too-narrow windows also fall back to the own-line bar.
+        FuelBar primaryFuelBar = FuelBar.None;
+        if (info.MaxFuelMass > 0f
+            && !(_stockPerfSuppressed && TryDrawHeaderFuelBar(sequence, info.FuelFraction)))
+            primaryFuelBar = FuelBar.OwnLineBefore;
+
+        if (isActive && _stockPerfSuppressed)
+            DrawActiveSequenceEnvButton(sequence);
+
+        // The dV / TWR / burn / Isp detail is drawn whether or not the node is
+        // expanded, because stock draws its per-sequence line on the collapsed
+        // header too; gating on expansion would hide the readout when collapsed.
 
         bool hasSecondary = AnalysisCache.TryGetSecondarySequenceInfo(sequence.Number, out var secondaryInfo)
             && secondaryInfo.EngineCount > 0;
@@ -313,7 +400,7 @@ internal static class StageInfoSection
         BurnSequenceAllocation? alloc =
             AnalysisCache.TryGetBurnAllocation(sequence.Number, out var pa) ? pa : null;
         bool primaryDimmed = hasSecondary && !AnalysisCache.IsPrimaryCurrentCondition;
-        DrawInlineInfoLine(info, primaryLabel, alloc, primaryDimmed, FuelBar.None);
+        DrawInlineInfoLine(info, primaryLabel, alloc, primaryDimmed, primaryFuelBar);
 
         if (hasSecondary)
         {
@@ -324,18 +411,112 @@ internal static class StageInfoSection
         }
     }
 
-    private static void DrawEditorSequenceInline(Sequence sequence, bool expanded)
+    private static void DrawEditorSequenceInline(Sequence sequence)
     {
-        if (!expanded)
-            return;
-
         if (!EditorAnalysisCache.TryGetSequenceInfo(sequence.Number, out var info)
             || info.EngineCount == 0)
             return;
 
-        // The stock editor header carries the env button on the right, so the
-        // fuel bar goes on its own line above the detail instead of the header.
-        DrawInlineInfoLine(info, "", alloc: null, isDimmed: false, FuelBar.OwnLineBefore);
+        // Drawn whether or not the node is expanded, matching stock's per-sequence
+        // line on the collapsed header. The fuel bar goes onto the header row,
+        // between the label and stock's env button; same fallbacks as in flight.
+        FuelBar fuelBar = FuelBar.None;
+        if (info.MaxFuelMass > 0f
+            && !(_stockPerfSuppressed && TryDrawHeaderFuelBar(sequence, info.FuelFraction)))
+            fuelBar = FuelBar.OwnLineBefore;
+
+        DrawInlineInfoLine(info, "", alloc: null, isDimmed: false, fuelBar);
+    }
+
+    /// <summary>
+    /// Draws the fuel bar on the sequence header row, in the gap between the
+    /// "Sequence N" label and the right-aligned Vac/Atm button. The hook runs
+    /// one line below the header with nothing drawn in between (stock perf line
+    /// suppressed), so SameLine re-enters the header row; ImGui keeps that
+    /// row's frame height. Returns false without drawing when the gap is too
+    /// narrow, in which case the caller falls back to an own-line bar.
+    /// </summary>
+    private static bool TryDrawHeaderFuelBar(Sequence sequence, float fuelFraction)
+    {
+        float labelWidth = ImGui.CalcTextSize(
+            string.Format(Inv, "Sequence {0}", sequence.Number)).X;
+        float spacing = ImGui.GetStyle().ItemSpacing.X;
+        // A little breathing room between the "Sequence N" label and the bar,
+        // on top of the default item spacing. Font-relative so it holds across
+        // UI scales.
+        float labelGap = spacing + ImGui.GetFontSize() * 0.5f;
+        ImGui.SameLine(ImGui.GetTreeNodeToLabelSpacing() + labelWidth + labelGap, 0f);
+
+        float availWidth = ImGui.GetContentRegionAvail().X;
+        float buttonWidth = ImGui.GetFontSize() * 4f;
+        float pctTextWidth = ImGui.CalcTextSize("100% fuel"u8).X + 8f;
+        float barWidth = availWidth - buttonWidth - pctTextWidth - spacing * 3f;
+        if (barWidth < 30f)
+        {
+            // A committed SameLine with no widget would pull the caller's next
+            // line onto the header row; cancel it.
+            ImGui.NewLine();
+            return false;
+        }
+
+        // Center the bar in the frame-height header row; align the percent
+        // text with the header label's frame padding.
+        float rowTop = ImGui.GetCursorPosY();
+        float barHeight = ImGui.GetTextLineHeight() * 0.6f;
+        float framePaddingY = ImGui.GetStyle().FramePadding.Y;
+        ImGui.SetCursorPosY(rowTop + (ImGui.GetFrameHeight() - barHeight) * 0.5f);
+        ImGui.ProgressBar(fuelFraction, new float2?(new float2(barWidth, barHeight)), ""u8);
+        ImGui.SameLine();
+        ImGui.SetCursorPosY(rowTop + framePaddingY);
+        ImGui.Text(string.Format(Inv, "{0}% fuel", (int)MathF.Round(fuelFraction * 100f)));
+        return true;
+    }
+
+    /// <summary>
+    /// Stock skips the Vac/Atm button for the flight-active sequence (its own
+    /// model pins that sequence to actual ambient and throttle), so StageInfo
+    /// draws its own in the same right-aligned slot: a three-state
+    /// Amb / Vac / Atm cycle. Amb keeps the Custom-mode default of evaluating
+    /// the active sequence at true ambient pressure; Vac and Atm behave like
+    /// the stock toggle and also write Sequence.Environment so the stock model
+    /// and the derived dropdown label agree.
+    /// </summary>
+    private static void DrawActiveSequenceEnvButton(Sequence sequence)
+    {
+        ImGui.SameLine();
+        float buttonWidth = ImGui.GetFontSize() * 4f;
+        float availWidth = ImGui.GetContentRegionAvail().X;
+        if (availWidth > buttonWidth)
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - buttonWidth);
+
+        ActiveSequenceEnv current = StageInfoSettings.ActiveSequenceOverride;
+        string label = current switch
+        {
+            ActiveSequenceEnv.Vacuum => "Vac",
+            ActiveSequenceEnv.Atmospheric => "Atm",
+            _ => "Amb",
+        };
+        if (ImGui.Button(string.Format(Inv, "{0}###seqenvmod{1}", label, sequence.Number),
+            new float2?(new float2(buttonWidth, 0f))))
+        {
+            ActiveSequenceEnv next = current switch
+            {
+                ActiveSequenceEnv.Ambient => ActiveSequenceEnv.Vacuum,
+                ActiveSequenceEnv.Vacuum => ActiveSequenceEnv.Atmospheric,
+                _ => ActiveSequenceEnv.Ambient,
+            };
+            StageInfoSettings.ActiveSequenceOverride = next;
+            if (next != ActiveSequenceEnv.Ambient && Program.ControlledVehicle is { } vehicle)
+            {
+                EnqueueSetSequenceEnvironment(vehicle.Parts, sequence,
+                    next == ActiveSequenceEnv.Atmospheric
+                        ? PerformanceEnvironment.Atmospheric
+                        : PerformanceEnvironment.Vacuum);
+            }
+            StageInfoSettings.Mode = StageDisplayMode.Custom;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("StageInfo environment for the active sequence. Click to cycle.\nAmb evaluates at the current ambient pressure; Vac and Atm pin it like the other sequences' toggles (Atm = body sea level)."u8);
     }
 
     private static void DrawInlineInfoLine(in SequenceBurnInfo info, string label,
@@ -454,8 +635,12 @@ internal static class StageInfoSection
 
             BurnSequenceAllocation? alloc =
                 AnalysisCache.TryGetBurnAllocation(info.SequenceNumber, out var pa) ? pa : null;
-            string label = WithLabel(string.Format(Inv, "Seq {0}", info.SequenceNumber),
-                AnalysisCache.PrimaryLabel);
+            // Only tag rows with the environment when both axes are shown and need
+            // telling apart; the single-axis label is a whole-vehicle summary (e.g.
+            // "(mixed)") that does not describe an individual sequence. Matches the
+            // inline path.
+            string envLabel = hasSecondary ? AnalysisCache.PrimaryLabel : "";
+            string label = WithLabel(string.Format(Inv, "Seq {0}", info.SequenceNumber), envLabel);
             DrawInlineInfoLine(info, label, alloc,
                 primaryDimmed || !info.IsActivated, FuelBar.AtEnd);
 
@@ -529,20 +714,40 @@ internal static class StageInfoSection
         selector();
     }
 
+    // Two-way sync with the per-sequence Vac/Atm toggles: VAC and ASL are
+    // presets that write every toggle and land back in the Custom state, whose
+    // label is derived from the toggles ("VAC" / "ASL" / "Custom"). A toggle
+    // click while VAC+ASL or Planning is shown returns to Custom (setter patch).
     private static void DrawModeSelector()
     {
-        ImGui.PushItemWidth(110f);
-        if (ImGui.BeginCombo("##StageInfoMode"u8, ModeLabel(StageInfoSettings.Mode)))
+        Vehicle? vehicle = Program.ControlledVehicle;
+        string customLabel = vehicle != null
+            ? StageInfoSettings.DeriveCustomLabel(vehicle)
+            : "Custom";
+        string preview = StageInfoSettings.Mode switch
         {
-            foreach (StageDisplayMode mode in AllModes)
-            {
-                bool isSelected = StageInfoSettings.Mode == mode;
-                if (ImGui.Selectable(ModeLabel(mode), isSelected))
-                    StageInfoSettings.Mode = mode;
-            }
+            StageDisplayMode.VacAsl => "VAC + ASL",
+            StageDisplayMode.Planning => "Planning",
+            _ => customLabel,
+        };
+        bool isCustom = StageInfoSettings.Mode == StageDisplayMode.Custom;
+
+        ImGui.PushItemWidth(110f);
+        if (ImGui.BeginCombo("##StageInfoMode"u8, preview))
+        {
+            if (ImGui.Selectable("VAC", isCustom && customLabel == "VAC") && vehicle != null)
+                StageInfoSettings.ApplyUniformPreset(vehicle, atmospheric: false);
+            if (ImGui.Selectable("ASL", isCustom && customLabel == "ASL") && vehicle != null)
+                StageInfoSettings.ApplyUniformPreset(vehicle, atmospheric: true);
+            if (ImGui.Selectable("VAC + ASL", StageInfoSettings.Mode == StageDisplayMode.VacAsl))
+                StageInfoSettings.Mode = StageDisplayMode.VacAsl;
+            if (ImGui.Selectable("Planning", StageInfoSettings.Mode == StageDisplayMode.Planning))
+                StageInfoSettings.Mode = StageDisplayMode.Planning;
             ImGui.EndCombo();
         }
         ImGui.PopItemWidth();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("VAC / ASL set every sequence's Vac/Atm toggle; toggling a sequence returns to Custom.\nVAC + ASL shows both uniform readouts, Planning evaluates at another body."u8);
 
         if (StageInfoSettings.Mode == StageDisplayMode.Planning)
         {
@@ -604,13 +809,26 @@ internal static class StageInfoSection
         }
         ImGui.PopItemWidth();
 
-        if (EditorStageInfoSettings.SelectedBodyHasAtmosphere())
+        // Same two-way sync as in flight: VAC / ASL write every sequence's
+        // Vac/Atm toggle; the label is derived from the toggles.
+        PartTree? parts = Program.Editor?.EditingSpace.Parts;
+        string customLabel = parts != null
+            ? EditorStageInfoSettings.DeriveCustomLabel(parts)
+            : "Custom";
+
+        ImGui.SameLine();
+        ImGui.PushItemWidth(90f);
+        if (ImGui.BeginCombo("##EditorMode"u8, customLabel))
         {
-            ImGui.SameLine();
-            bool useVacuum = EditorStageInfoSettings.UseVacuum;
-            if (ImGui.Checkbox("Vacuum"u8, ref useVacuum))
-                EditorStageInfoSettings.UseVacuum = useVacuum;
+            if (ImGui.Selectable("VAC", customLabel == "VAC") && parts != null)
+                EditorStageInfoSettings.ApplyUniformPreset(parts, atmospheric: false);
+            if (ImGui.Selectable("ASL", customLabel == "ASL") && parts != null)
+                EditorStageInfoSettings.ApplyUniformPreset(parts, atmospheric: true);
+            ImGui.EndCombo();
         }
+        ImGui.PopItemWidth();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("VAC / ASL set every sequence's Vac/Atm toggle against the selected body."u8);
     }
 
     #endregion
@@ -910,6 +1128,81 @@ internal static class StageInfoSection
         return codes;
     }
 
+    /// <summary>
+    /// Neutralizes the stock per-sequence dV/TWR/Isp draws in
+    /// DrawSequenceContent by zeroing the local that holds the
+    /// PartTree.PerformanceSequences span. Anchor: the first call to
+    /// SequencePerformanceList.PerformanceSequences (the span getter) followed
+    /// by a store; the span local is overwritten with
+    /// default(ReadOnlySpan&lt;SequencePerformance&gt;) right after that store.
+    /// With an empty span, `num &lt; performanceSequences.Length` is always false
+    /// and the per-row `performanceSequences[num]` ternary yields
+    /// default(SequencePerformance), so all three `&gt; 0f` guards fall through
+    /// and nothing is drawn. The span is read only by that per-row ternary, and
+    /// its result (the `sequencePerformance` struct) only by those three draws,
+    /// so nothing else in the method is affected. The Vac/Atm environment button
+    /// is emitted earlier and is left intact. On any IL mismatch the instructions
+    /// are returned unchanged (the stock line stays, duplicated with the inline
+    /// row) and a warning is logged, never a crash. _stockPerfSuppressed is set
+    /// only when the rewrite is actually applied.
+    /// </summary>
+    static IEnumerable<CodeInstruction> DrawSequenceContentSuppressTranspiler(
+        IEnumerable<CodeInstruction> instructions)
+    {
+        var codes = new List<CodeInstruction>(instructions);
+
+        MethodInfo? spanGetter = AccessTools.PropertyGetter(
+            typeof(SequencePerformanceList),
+            nameof(SequencePerformanceList.PerformanceSequences));
+        if (spanGetter == null)
+            return LogSuppressSkip(codes, "stock performance getter not found");
+
+        int spanStore = -1, spanLocal = -1;
+        for (int i = 0; i < codes.Count - 1; i++)
+        {
+            if (codes[i].Calls(spanGetter) && IsStloc(codes[i + 1]))
+            {
+                spanStore = i + 1;
+                spanLocal = LocalIndex(codes[i + 1]);
+                break;
+            }
+        }
+        if (spanStore < 0 || spanLocal < 0)
+            return LogSuppressSkip(codes, "stock performance span store not found");
+
+        // Clone an existing address-load of the span local (span members are
+        // called through a managed pointer, so ldloca is guaranteed present)
+        // rather than constructing one, so the operand matches whatever Harmony
+        // read.
+        CodeInstruction? spanAddrLoad = null;
+        foreach (CodeInstruction ci in codes)
+            if (IsLdloca(ci) && LocalIndex(ci) == spanLocal)
+            {
+                spanAddrLoad = ci.Clone();
+                break;
+            }
+        if (spanAddrLoad == null)
+            return LogSuppressSkip(codes, "stock performance span address-load not found");
+
+        codes.Insert(spanStore + 1, spanAddrLoad);
+        codes.Insert(spanStore + 2,
+            new CodeInstruction(OpCodes.Initobj, typeof(ReadOnlySpan<SequencePerformance>)));
+
+        _stockPerfSuppressed = true;
+        if (DebugConfig.StageInfo)
+            Brutal.Logging.DefaultCategory.Log.Debug(
+                "[StageInfo] Stock per-sequence dV/TWR/Isp line suppressed.");
+        return codes;
+    }
+
+    private static List<CodeInstruction> LogSuppressSkip(List<CodeInstruction> codes, string why)
+    {
+        Brutal.Logging.DefaultCategory.Log.Warning(
+            $"[StageInfo] Stock dV/TWR/Isp suppression skipped ({why}); game UI code " +
+            "changed. Stock line left intact to avoid a broken panel.");
+        return codes;
+    }
+
     private static bool IsStloc(CodeInstruction ci) =>
         ci.opcode == OpCodes.Stloc_0 || ci.opcode == OpCodes.Stloc_1
         || ci.opcode == OpCodes.Stloc_2 || ci.opcode == OpCodes.Stloc_3
@@ -919,6 +1212,9 @@ internal static class StageInfoSection
         ci.opcode == OpCodes.Ldloc_0 || ci.opcode == OpCodes.Ldloc_1
         || ci.opcode == OpCodes.Ldloc_2 || ci.opcode == OpCodes.Ldloc_3
         || ci.opcode == OpCodes.Ldloc_S || ci.opcode == OpCodes.Ldloc;
+
+    private static bool IsLdloca(CodeInstruction ci) =>
+        ci.opcode == OpCodes.Ldloca_S || ci.opcode == OpCodes.Ldloca;
 
     private static int LocalIndex(CodeInstruction ci)
     {

@@ -27,6 +27,10 @@ internal record struct SequenceBurnInfo
     public float Twr;
     public float JettisonedMass;
     public int EngineCount;
+    // Whether this sequence was evaluated at a nonzero (atmospheric) pressure.
+    // Drives the (VAC)/(ATM)/(mixed) label so it reflects exactly the sequences
+    // that produced a row, not every toggled sequence.
+    public bool Atmospheric;
 }
 
 internal record struct VehicleBurnAnalysis
@@ -87,15 +91,21 @@ internal static class SequenceAnalyzer
     #endregion
 
     public static VehicleBurnAnalysis Analyze(Vehicle vehicle,
-        float ambientPressure = 0f, float? surfaceGravityOverride = null, bool log = false)
+        float ambientPressure = 0f, float? surfaceGravityOverride = null, bool log = false,
+        PerSequenceEnv? perSequenceEnv = null)
     {
         float surfaceGravity = surfaceGravityOverride
             ?? EnvironmentHelpers.ComputeSurfaceGravity(vehicle.Parent);
-        return Analyze(vehicle.Parts, vehicle.TotalMass, ambientPressure, surfaceGravity, log);
+        return Analyze(vehicle.Parts, vehicle.TotalMass, ambientPressure, surfaceGravity, log,
+            perSequenceEnv);
     }
 
+    // perSequenceEnv, when set (Custom mode), evaluates each sequence at its own
+    // stock Vac/Atm toggle instead of the uniform ambientPressure; ambientPressure
+    // then applies only to the flight-active sequence.
     public static VehicleBurnAnalysis Analyze(PartTree parts, float totalMass,
-        float ambientPressure, float surfaceGravity, bool log = false)
+        float ambientPressure, float surfaceGravity, bool log = false,
+        PerSequenceEnv? perSequenceEnv = null)
     {
 #if DEBUG
         long perfStart = DebugConfig.Performance ? Stopwatch.GetTimestamp() : 0;
@@ -172,15 +182,40 @@ internal static class SequenceAnalyzer
                 continue;
             }
 
+            // In Custom mode each sequence fires in its own environment: the
+            // flight-active sequence per its Amb/Vac/Atm override (Amb = true
+            // ambient), the rest at their Vac/Atm toggle (Vac -> 0, Atm -> body
+            // sea level). Otherwise the uniform ambientPressure applies to every
+            // sequence.
+            float seqPressure = ambientPressure;
+            if (perSequenceEnv.HasValue)
+            {
+                PerSequenceEnv pse = perSequenceEnv.Value;
+                if (sequence.Number == pse.ActiveSequenceNumber)
+                {
+                    seqPressure = pse.ActiveEnvironment switch
+                    {
+                        ActiveSequenceEnv.Vacuum => 0f,
+                        ActiveSequenceEnv.Atmospheric => pse.SeaLevelPressure,
+                        _ => ambientPressure,
+                    };
+                }
+                else
+                {
+                    seqPressure = sequence.Environment == PerformanceEnvironment.Atmospheric
+                        ? pse.SeaLevelPressure : 0f;
+                }
+            }
+
             // Aggregate thrust + mass flow (pressure-aware).
             float totalThrust = 0f;
             float totalFlowRate = 0f;
-            if (ambientPressure > 0f)
+            if (seqPressure > 0f)
             {
                 foreach (EngineController engine in _pooledEngines)
                 {
                     var data = RocketControllerData.ComputeFromCores(
-                        engine.Cores.AsSpan(), float3.Zero, ambientPressure);
+                        engine.Cores.AsSpan(), float3.Zero, seqPressure);
                     totalThrust += data.ThrustMax.Length();
                     totalFlowRate += data.MassFlowRateMax;
                 }
@@ -252,7 +287,8 @@ internal static class SequenceAnalyzer
                 MassFlowRate = totalFlowRate,
                 Twr = twr,
                 JettisonedMass = jettisonedMass,
-                EngineCount = _pooledEngines.Count
+                EngineCount = _pooledEngines.Count,
+                Atmospheric = seqPressure > 0f
             };
 
             result.Sequences.Add(info);

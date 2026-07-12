@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using KSA;
 using StageInfo.UI;
 
@@ -7,6 +9,19 @@ namespace StageInfo.Analysis;
 internal static class EditorAnalysisCache
 {
     private static readonly AnalysisSlot _primary = new();
+
+    // Recompute gate: the editor tab calls Update every frame, but the vehicle
+    // only changes on edits. SequencePerformanceList.SetDirty (patched in
+    // StageInfoSection) marks the cache dirty on every stock invalidation
+    // (part/fuel/sequence/environment changes); body selection and PartTree
+    // identity are tracked here. The periodic refresh covers any mutation path
+    // that bypasses SetDirty.
+    private static bool _dirty = true;
+    private static PartTree? _lastParts;
+    private static string? _lastBodyId;
+    private static long _lastRunTimestamp;
+
+    public static void MarkDirty() => _dirty = true;
 
     private static VehicleFuelAnalysis? _cachedStages;
     private static readonly List<StageFuelInfo> _cachedStageList = new();
@@ -18,8 +33,6 @@ internal static class EditorAnalysisCache
 
     private static readonly Stack<List<RcsSubstanceInfo>> _cachedStageSubstancePool = new();
     private static readonly List<List<RcsSubstanceInfo>> _activeCachedStageSubstanceLists = new();
-
-    public static string PrimaryLabel { get; private set; } = "(VAC)";
 
     public static VehicleBurnAnalysis? Sequences => _primary.Sequences;
     public static VehicleFuelAnalysis? Stages => _cachedStages;
@@ -36,6 +49,16 @@ internal static class EditorAnalysisCache
 
     public static void Update(PartTree parts)
     {
+        bool inputsChanged = !ReferenceEquals(parts, _lastParts)
+            || !string.Equals(EditorStageInfoSettings.SelectedBodyId, _lastBodyId, StringComparison.Ordinal);
+        long now = Stopwatch.GetTimestamp();
+        bool periodicRefresh = now - _lastRunTimestamp > Stopwatch.Frequency;
+        if (!_dirty && !inputsChanged && !periodicRefresh)
+            return;
+        _dirty = false;
+        _lastParts = parts;
+        _lastRunTimestamp = now;
+
         if (parts.Moles == null)
         {
             ClearAll();
@@ -49,10 +72,10 @@ internal static class EditorAnalysisCache
             return;
         }
 
-        var env = EditorStageInfoSettings.ResolveEnvironment();
-        PrimaryLabel = env.Label;
+        var env = EditorStageInfoSettings.ResolveEnvironment(parts);
+        _lastBodyId = EditorStageInfoSettings.SelectedBodyId;
 
-        _primary.RunSequenceAnalysis(parts, totalMass, env.Pressure, env.SurfaceGravity);
+        _primary.RunSequenceAnalysis(parts, totalMass, env.Pressure, env.SurfaceGravity, env.PerSequence);
 
         RunStageAnalysis(parts);
         RunRcsAnalysis(parts, totalMass, env.Pressure);
@@ -62,6 +85,10 @@ internal static class EditorAnalysisCache
     {
         ClearAll();
         _cachedStageSubstancePool.Clear();
+        _dirty = true;
+        _lastParts = null;
+        _lastBodyId = null;
+        _lastRunTimestamp = 0;
     }
 
     private static float ComputeTotalMass(PartTree parts)
@@ -156,7 +183,5 @@ internal static class EditorAnalysisCache
         ReturnCachedStageSubstanceLists();
         _cachedRcsStageList.Clear();
         _rcsStageLookup.Clear();
-
-        PrimaryLabel = "(VAC)";
     }
 }
