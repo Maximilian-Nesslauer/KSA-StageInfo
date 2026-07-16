@@ -1,5 +1,10 @@
 # StageInfo [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> [!IMPORTANT]
+> **Archived and no longer maintained.** As of KSA 2026.7.6.4939 the stock game reworked the Sequence UI to be shared between the editor and flight, and it now shows per-sequence Delta V, TWR, and fuel bars directly in the in-flight staging window, which is the core readout StageInfo was built to add. With stock covering it, the mod is retired.
+>
+> The final release (v0.6.0) is validated against KSA 2026.7.5.4892. It may keep working on later builds, but it will not be updated.
+
 Extra info and Flight performance readouts in the stock staging window for [Kitten Space Agency](https://ahwoo.com/app/100000/kitten-space-agency).
 
 The stock staging window computes per-sequence Delta V and TWR in the vehicle editor only, with a fixed vacuum / sea-level toggle.
